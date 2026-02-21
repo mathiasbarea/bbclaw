@@ -31,11 +31,13 @@ from .base import LLMProvider, LLMResponse, Message, ToolCall
 
 logger = logging.getLogger(__name__)
 
-# ── Constantes OAuth de OpenAI Codex ──────────────────────────────────────────
-OPENAI_AUTH_URL = "https://auth.openai.com/authorize"
+# ── Constantes OAuth de OpenAI Codex ────────────────────────────────────────
+# Valores exactos extraídos del código fuente de OpenCode + Codex CLI oficial.
+OPENAI_AUTH_URL = "https://auth.openai.com/oauth/authorize"   # NOta: /oauth/ en el path
 OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token"
-OPENAI_CLIENT_ID = "app_EMNMoTBDqRLCi7vAmgMGwJpWpTBBL1l"  # Codex CLI public client
-OPENAI_REDIRECT_URI = "http://localhost:54321/callback"
+OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"            # Client ID público oficial
+OPENAI_REDIRECT_PORT = 1455
+OPENAI_REDIRECT_URI = f"http://localhost:{OPENAI_REDIRECT_PORT}/auth/callback"
 OPENAI_SCOPE = "openid profile email offline_access"
 KEYRING_SERVICE = "bbclaud"
 KEYRING_KEY = "codex_oauth_tokens"
@@ -60,7 +62,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/callback":
+        if parsed.path == "/auth/callback":     # Puerto 1455, path /auth/callback
             params = parse_qs(parsed.query)
             if "code" in params:
                 _CallbackHandler.auth_code = params["code"][0]
@@ -68,16 +70,21 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(
-                b"<html><body><h2>Autenticacion exitosa!</h2>"
-                b"<p>Puedes cerrar esta ventana y volver a la terminal.</p></body></html>"
+                b"<html><body style='font-family:sans-serif;margin:60px auto;max-width:400px;text-align:center'>"
+                b"<h2>&#x2705; Autenticaci&#xf3;n exitosa</h2>"
+                b"<p>Pod&#xe9;s cerrar esta ventana y volver a la terminal.</p>"
+                b"</body></html>"
             )
             _CallbackHandler.done_event.set()
+        else:
+            self.send_response(404)
+            self.end_headers()
 
     def log_message(self, format, *args):  # noqa: A002
         pass  # Silenciar logs del servidor HTTP
 
 
-def _run_local_server(port: int = 54321) -> tuple[HTTPServer, Thread]:
+def _run_local_server(port: int = OPENAI_REDIRECT_PORT) -> tuple[HTTPServer, Thread]:
     _CallbackHandler.auth_code = None
     _CallbackHandler.done_event.clear()
     server = HTTPServer(("localhost", port), _CallbackHandler)
@@ -158,6 +165,9 @@ class CodexOAuthProvider(LLMProvider):
             "state": state,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
+            # Parámetros requeridos por el flujo simplificado del Codex CLI:
+            "codex_cli_simplified_flow": "true",
+            "id_token_add_organizations": "true",
         }
         auth_url = f"{OPENAI_AUTH_URL}?{urlencode(auth_params)}"
 
