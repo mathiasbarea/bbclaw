@@ -1,13 +1,18 @@
 """
 Proveedor Codex con autenticación OAuth 2.0 + PKCE.
 
+IMPORTANTE: gpt-5.3-codex NO usa api.openai.com/v1/chat/completions.
+Usa el endpoint: https://chatgpt.com/backend-api/codex/responses
+con la Responses API (streaming SSE), y requiere el header 'chatgpt-account-id'.
+
 Flujo:
-1. Genera code_verifier + code_challenge
-2. Abre browser → login OpenAI
-3. Escucha callback HTTP en localhost
+1. Genera code_verifier + code_challenge (PKCE)
+2. Abre browser → login OpenAI en auth.openai.com/oauth/authorize
+3. Escucha callback HTTP en localhost:1455/auth/callback
 4. Intercambia code → access_token + refresh_token
-5. Persiste tokens encriptados en keyring del OS
-6. Auto-refresca cuando el token expira
+5. Fetcha el account_id desde chatgpt.com/backend-api/accounts/check
+6. Persiste tokens en archivo (keyring como intento primario)
+7. Auto-refresca cuando el token expira
 """
 
 from __future__ import annotations
@@ -33,16 +38,22 @@ from .base import LLMProvider, LLMResponse, Message, ToolCall
 
 logger = logging.getLogger(__name__)
 
-# ── Constantes OAuth de OpenAI Codex ────────────────────────────────────────
-# Valores exactos extraídos del código fuente de OpenCode + Codex CLI oficial.
-OPENAI_AUTH_URL = "https://auth.openai.com/oauth/authorize"   # NOta: /oauth/ en el path
+# ── Constantes OAuth de OpenAI Codex ─────────────────────────────────────────
+# Valores idénticos a los del Codex CLI oficial y OpenCode.
+OPENAI_AUTH_URL = "https://auth.openai.com/oauth/authorize"
 OPENAI_TOKEN_URL = "https://auth.openai.com/oauth/token"
-OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"            # Client ID público oficial
+OPENAI_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 OPENAI_REDIRECT_PORT = 1455
 OPENAI_REDIRECT_URI = f"http://localhost:{OPENAI_REDIRECT_PORT}/auth/callback"
 OPENAI_SCOPE = "openid profile email offline_access"
+
+# ── Endpoint de la Responses API de Codex ────────────────────────────────────
+CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
+CODEX_ACCOUNTS_URL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
+
 KEYRING_SERVICE = "bbclaud"
 KEYRING_KEY = "codex_oauth_tokens"
+TOKEN_FILE = Path("data/.tokens.json")
 
 
 def _pkce_pair() -> tuple[str, str]:
@@ -57,14 +68,14 @@ def _pkce_pair() -> tuple[str, str]:
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):
-    """HTTP handler mínimo para recibir el callback OAuth."""
+    """HTTP handler mínimo para recibir el callback OAuth en localhost:1455."""
 
     auth_code: str | None = None
     done_event: Event = Event()
 
     def do_GET(self):  # noqa: N802
         parsed = urlparse(self.path)
-        if parsed.path == "/auth/callback":     # Puerto 1455, path /auth/callback
+        if parsed.path == "/auth/callback":
             params = parse_qs(parsed.query)
             if "code" in params:
                 _CallbackHandler.auth_code = params["code"][0]
@@ -72,9 +83,10 @@ class _CallbackHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(
-                b"<html><body style='font-family:sans-serif;margin:60px auto;max-width:400px;text-align:center'>"
-                b"<h2>&#x2705; Autenticaci&#xf3;n exitosa</h2>"
-                b"<p>Pod&#xe9;s cerrar esta ventana y volver a la terminal.</p>"
+                b"<html><body style='font-family:sans-serif;margin:60px auto;"
+                b"max-width:400px;text-align:center'>"
+                b"<h2>&#x2705; Autenticacion exitosa</h2>"
+                b"<p>Podes cerrar esta ventana y volver a la terminal.</p>"
                 b"</body></html>"
             )
             _CallbackHandler.done_event.set()
@@ -86,10 +98,10 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         pass  # Silenciar logs del servidor HTTP
 
 
-def _run_local_server(port: int = OPENAI_REDIRECT_PORT) -> tuple[HTTPServer, Thread]:
+def _run_local_server() -> tuple[HTTPServer, Thread]:
     _CallbackHandler.auth_code = None
     _CallbackHandler.done_event.clear()
-    server = HTTPServer(("localhost", port), _CallbackHandler)
+    server = HTTPServer(("localhost", OPENAI_REDIRECT_PORT), _CallbackHandler)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread
@@ -97,24 +109,22 @@ def _run_local_server(port: int = OPENAI_REDIRECT_PORT) -> tuple[HTTPServer, Thr
 
 class CodexOAuthProvider(LLMProvider):
     """
-    Proveedor LLM usando Codex de OpenAI con autenticación OAuth.
-    Compatible con la interfaz LLMProvider abstracta.
+    Proveedor LLM para gpt-5.3-codex con autenticación OAuth.
+    Usa https://chatgpt.com/backend-api/codex/responses (Responses API + SSE).
     """
 
-    _MODEL = "codex-mini-latest"
-    _BASE_URL = "https://api.openai.com/v1"
-    _TOKEN_FILE = "data/.tokens.json"  # fallback cuando el keyring falla
+    _MODEL = "gpt-5.3-codex"
+    _TOKEN_FILE = TOKEN_FILE
 
     def __init__(self, base_url: str | None = None):
-        self._base_url = base_url or self._BASE_URL
+        # base_url ignorado — el endpoint de Codex es fijo
         self._tokens: dict | None = None
         self._client = httpx.AsyncClient(timeout=120)
 
-    # ── Auth ──────────────────────────────────────────────────────────────────
+    # ── Persistencia de tokens ────────────────────────────────────────────────
 
     def _load_tokens(self) -> dict | None:
         """Carga tokens: primero keyring, luego archivo de fallback."""
-        # 1. Intentar keyring
         try:
             import keyring
             raw = keyring.get_password(KEYRING_SERVICE, KEYRING_KEY)
@@ -123,7 +133,6 @@ class CodexOAuthProvider(LLMProvider):
         except Exception as e:
             logger.debug("Keyring no disponible (%s), probando archivo...", e)
 
-        # 2. Fallback: archivo local
         try:
             p = Path(self._TOKEN_FILE)
             if p.exists():
@@ -137,50 +146,32 @@ class CodexOAuthProvider(LLMProvider):
         """Guarda tokens: primero keyring, si falla usa archivo."""
         raw = json.dumps(tokens)
 
-        # 1. Intentar keyring
         try:
             import keyring
             keyring.set_password(KEYRING_SERVICE, KEYRING_KEY, raw)
-            return  # exito
+            return
         except Exception as e:
             logger.warning("Keyring no disponible (%s), guardando en archivo...", e)
 
-        # 2. Fallback: archivo local
         try:
             p = Path(self._TOKEN_FILE)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(raw, encoding="utf-8")
-            # Permisos restrictivos en Windows: solo el usuario actual
-            import stat
-            p.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            try:
+                p.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            except Exception:
+                pass
             logger.info("Tokens guardados en: %s", p)
         except Exception as e:
             logger.error("No se pudo guardar tokens: %s", e)
 
     def _is_expired(self, tokens: dict) -> bool:
-        """Devuelve True si el access_token está a menos de 60s de expirar."""
         return time.time() >= tokens.get("expires_at", 0) - 60
 
-    async def _refresh(self, refresh_token: str) -> dict:
-        """Refresca el access_token usando el refresh_token."""
-        resp = await self._client.post(
-            OPENAI_TOKEN_URL,
-            data={
-                "grant_type": "refresh_token",
-                "client_id": OPENAI_CLIENT_ID,
-                "refresh_token": refresh_token,
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        data["expires_at"] = time.time() + data.get("expires_in", 3600)
-        return data
+    # ── Flujo OAuth ───────────────────────────────────────────────────────────
 
     def _do_browser_auth(self) -> dict:
-        """
-        Ejecuta el flujo OAuth completo en browser.
-        Bloqueante — se llama desde un executor para no bloquear el loop async.
-        """
+        """Ejecuta el flujo OAuth completo en browser (bloqueante)."""
         verifier, challenge = _pkce_pair()
         state = secrets.token_urlsafe(16)
 
@@ -192,7 +183,6 @@ class CodexOAuthProvider(LLMProvider):
             "state": state,
             "code_challenge": challenge,
             "code_challenge_method": "S256",
-            # Parámetros requeridos por el flujo simplificado del Codex CLI:
             "codex_cli_simplified_flow": "true",
             "id_token_add_organizations": "true",
         }
@@ -201,15 +191,14 @@ class CodexOAuthProvider(LLMProvider):
         server, _thread = _run_local_server()
 
         print("\n🔐 Abriendo browser para autenticar con OpenAI Codex...")
-        print(f"   Si no abre automáticamente, visita:\n   {auth_url}\n")
+        print(f"   Si no abre automaticamente, visita:\n   {auth_url}\n")
         webbrowser.open(auth_url)
 
-        # Esperar callback (max 3 minutos)
         _CallbackHandler.done_event.wait(timeout=180)
         server.shutdown()
 
         if not _CallbackHandler.auth_code:
-            raise RuntimeError("No se recibió el código de autorización OAuth. Tiempo agotado.")
+            raise RuntimeError("No se recibio el codigo de autorizacion OAuth. Tiempo agotado.")
 
         # Intercambiar code → tokens
         resp = httpx.post(
@@ -227,25 +216,67 @@ class CodexOAuthProvider(LLMProvider):
         data["expires_at"] = time.time() + data.get("expires_in", 3600)
         return data
 
-    async def get_token(self) -> str:
-        """Devuelve un access_token válido, autenticando o refrescando si es necesario."""
-        # Intentar cargar desde keyring si no tenemos en memoria
+    async def _fetch_account_id(self, access_token: str) -> str:
+        """Obtiene el account_id de ChatGPT requerido para el header chatgpt-account-id."""
+        try:
+            resp = await self._client.get(
+                CODEX_ACCOUNTS_URL,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                },
+            )
+            if resp.is_success:
+                data = resp.json()
+                accounts = data.get("accounts", [])
+                if accounts:
+                    return accounts[0].get("account_id", "")
+        except Exception as e:
+            logger.warning("No se pudo obtener account_id: %s", e)
+        return ""
+
+    async def _refresh(self, refresh_token: str) -> dict:
+        """Refresca el access_token."""
+        resp = await self._client.post(
+            OPENAI_TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "client_id": OPENAI_CLIENT_ID,
+                "refresh_token": refresh_token,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        data["expires_at"] = time.time() + data.get("expires_in", 3600)
+        return data
+
+    async def get_token(self) -> dict:
+        """Devuelve tokens válidos (con access_token y account_id), autenticando si es necesario."""
         if self._tokens is None:
             self._tokens = self._load_tokens()
 
-        # Si no hay tokens → flujo completo de browser
         if self._tokens is None:
             loop = asyncio.get_event_loop()
             self._tokens = await loop.run_in_executor(None, self._do_browser_auth)
+            # Fetch account_id si no está presente
+            if not self._tokens.get("account_id"):
+                self._tokens["account_id"] = await self._fetch_account_id(
+                    self._tokens["access_token"]
+                )
             self._save_tokens(self._tokens)
 
-        # Si el token expiró → refrescar
         elif self._is_expired(self._tokens):
             logger.info("Token expirado, refrescando...")
-            self._tokens = await self._refresh(self._tokens["refresh_token"])
+            refreshed = await self._refresh(self._tokens["refresh_token"])
+            # Preservar account_id si el refresh no lo devuelve
+            if not refreshed.get("account_id"):
+                refreshed["account_id"] = self._tokens.get("account_id") or await self._fetch_account_id(
+                    refreshed["access_token"]
+                )
+            self._tokens = refreshed
             self._save_tokens(self._tokens)
 
-        return self._tokens["access_token"]
+        return self._tokens
 
     async def logout(self) -> None:
         """Elimina los tokens guardados."""
@@ -255,20 +286,169 @@ class CodexOAuthProvider(LLMProvider):
             keyring.delete_password(KEYRING_SERVICE, KEYRING_KEY)
         except Exception:
             pass
-        print("✓ Sesión cerrada.")
+        try:
+            Path(self._TOKEN_FILE).unlink(missing_ok=True)
+        except Exception:
+            pass
+        print("Sesion cerrada.")
 
-    # ── LLM Calls ─────────────────────────────────────────────────────────────
+    # ── Llamadas LLM — Responses API con SSE ─────────────────────────────────
 
-    def _messages_to_dict(self, messages: list[Message]) -> list[dict]:
-        result = []
+    def _messages_to_codex_input(self, messages: list[Message]) -> tuple[str, list[dict]]:
+        """
+        Convierte la lista de mensajes al formato de la Responses API de Codex.
+        Separa el system prompt (instructions) del resto (input items).
+        Retorna (instructions, input_items).
+        """
+        instructions = ""
+        input_items: list[dict] = []
+
         for m in messages:
-            d: dict = {"role": m.role, "content": m.content}
-            if m.tool_call_id:
-                d["tool_call_id"] = m.tool_call_id
-            if m.name:
-                d["name"] = m.name
-            result.append(d)
-        return result
+            if isinstance(m, dict):
+                role = m.get("role", "")
+                content = m.get("content") or ""
+                tool_calls = m.get("tool_calls")
+                tool_call_id = m.get("tool_call_id")
+                name = m.get("name")
+            else:
+                role = m.role
+                content = m.content or ""
+                tool_calls = m.__dict__.get("_raw_tool_calls")
+                tool_call_id = m.tool_call_id
+                name = m.name
+
+            if role == "system":
+                instructions = str(content)
+                continue
+
+            if role == "user":
+                input_items.append({
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": str(content)}],
+                })
+
+            elif role == "assistant":
+                items: list[dict] = []
+                if content:
+                    items.append({
+                        "role": "assistant",
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": str(content)}],
+                        "status": "completed",
+                    })
+                if tool_calls:
+                    for tc in tool_calls:
+                        fn = tc.get("function", {})
+                        items.append({
+                            "type": "function_call",
+                            "id": tc["id"],
+                            "call_id": tc["id"],
+                            "name": fn.get("name", ""),
+                            "arguments": fn.get("arguments", "{}"),
+                        })
+                input_items.extend(items)
+
+            elif role == "tool":
+                input_items.append({
+                    "type": "function_call_output",
+                    "call_id": tool_call_id or "",
+                    "output": str(content),
+                })
+
+        return instructions, input_items
+
+    async def _parse_sse_stream(self, response: httpx.Response) -> tuple[str, list[ToolCall]]:
+        """Parsea la respuesta SSE de la Responses API de Codex."""
+        text = ""
+        tool_calls: list[ToolCall] = []
+        buffer = ""
+
+        async for chunk in response.aiter_bytes():
+            buffer += chunk.decode("utf-8", errors="replace").replace("\r\n", "\n")
+
+            while "\n\n" in buffer:
+                event_str, buffer = buffer.split("\n\n", 1)
+                data_lines = [
+                    line[5:].strip()
+                    for line in event_str.split("\n")
+                    if line.startswith("data:")
+                ]
+                if not data_lines:
+                    continue
+
+                data = "\n".join(data_lines).strip()
+                if data == "[DONE]":
+                    continue
+
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+
+                etype = event.get("type", "")
+
+                if etype == "response.output_text.delta":
+                    text += event.get("delta", "")
+
+                elif etype in ("response.completed", "response.done"):
+                    resp_obj = event.get("response", {})
+                    # Extraer texto del response completo
+                    for item in resp_obj.get("output", []):
+                        if item.get("type") == "message":
+                            for part in item.get("content", []):
+                                if part.get("type") == "output_text":
+                                    text = part.get("text", text)
+                    # Extraer tool calls del response completo
+                    for item in resp_obj.get("output", []):
+                        if item.get("type") == "function_call":
+                            tc_name = item.get("name", "")
+                            tc_args = item.get("arguments", "{}")
+                            tc_id = item.get("call_id") or item.get("id") or tc_name
+                            if tc_name:
+                                try:
+                                    args = json.loads(tc_args) if isinstance(tc_args, str) else tc_args
+                                except json.JSONDecodeError:
+                                    args = {}
+                                tool_calls.append(ToolCall(id=tc_id, name=tc_name, arguments=args))
+
+                elif etype == "response.output_item.done":
+                    item = event.get("item", {})
+                    if item.get("type") == "function_call":
+                        tc_name = item.get("name", "")
+                        tc_args = item.get("arguments", "{}")
+                        tc_id = item.get("call_id") or item.get("id") or tc_name
+                        if tc_name:
+                            try:
+                                args = json.loads(tc_args) if isinstance(tc_args, str) else tc_args
+                            except json.JSONDecodeError:
+                                args = {}
+                            tool_calls.append(ToolCall(id=tc_id, name=tc_name, arguments=args))
+
+                elif etype == "error" or etype == "response.failed":
+                    msg = event.get("message") or str(event)
+                    raise RuntimeError(f"Codex stream error: {msg}")
+
+        return text.strip(), tool_calls
+
+    def _normalize_tools(self, tools: list[dict]) -> list[dict]:
+        """Convierte schemas OpenAI-style al formato flat que usa la Responses API de Codex."""
+        normalized = []
+        for t in tools:
+            fn = t.get("function", {})
+            name = fn.get("name") or t.get("name", "")
+            if not name:
+                continue
+            normalized.append({
+                "type": "function",
+                "name": name,
+                "description": fn.get("description") or t.get("description", ""),
+                "parameters": fn.get("parameters") or t.get("parameters") or {
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": False,
+                },
+            })
+        return normalized
 
     async def complete(
         self,
@@ -277,64 +457,73 @@ class CodexOAuthProvider(LLMProvider):
         temperature: float = 0.7,
         max_tokens: int = 4096,
     ) -> LLMResponse:
-        token = await self.get_token()
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        }
+        tokens = await self.get_token()
+        access_token = tokens["access_token"]
+        account_id = tokens.get("account_id", "")
+
+        instructions, input_items = self._messages_to_codex_input(messages)
+
         body: dict = {
             "model": self._MODEL,
-            "messages": self._messages_to_dict(messages),
-            "max_tokens": max_tokens,
-            "temperature": temperature,
+            "store": False,
+            "stream": True,
+            "instructions": instructions,
+            "input": input_items,
+            "text": {"verbosity": "medium"},
+            "include": ["reasoning.encrypted_content"],
+            "parallel_tool_calls": True,
         }
+
         if tools:
-            body["tools"] = tools
+            body["tools"] = self._normalize_tools(tools)
             body["tool_choice"] = "auto"
 
-        resp = await self._client.post(
-            f"{self._base_url}/chat/completions",
-            headers=headers,
-            json=body,
-        )
-        resp.raise_for_status()
-        data = resp.json()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "chatgpt-account-id": account_id,
+            "OpenAI-Beta": "responses=experimental",
+            "originator": "bbclaud",
+            "User-Agent": "bbclaud (python)",
+        }
 
-        choice = data["choices"][0]
-        msg = choice["message"]
-        content = msg.get("content")
-        finish_reason = choice.get("finish_reason", "stop")
+        async with self._client.stream(
+            "POST", CODEX_URL, headers=headers, json=body
+        ) as response:
+            if response.status_code == 401 and tokens.get("refresh_token"):
+                # Token expirado → refrescar y reintentar
+                self._tokens = None
+                tokens = await self.get_token()
+                headers["Authorization"] = f"Bearer {tokens['access_token']}"
+                headers["chatgpt-account-id"] = tokens.get("account_id", "")
 
-        tool_calls: list[ToolCall] = []
-        for tc in msg.get("tool_calls") or []:
-            tool_calls.append(
-                ToolCall(
-                    id=tc["id"],
-                    name=tc["function"]["name"],
-                    arguments=json.loads(tc["function"]["arguments"]),
+            if not response.is_success:
+                body_text = await response.aread()
+                raise httpx.HTTPStatusError(
+                    f"Codex API error ({response.status_code}): {body_text.decode()}",
+                    request=response.request,
+                    response=response,
                 )
-            )
 
+            text, tool_calls = await self._parse_sse_stream(response)
+
+        finish_reason = "tool_calls" if tool_calls else "stop"
         return LLMResponse(
-            content=content,
+            content=text or None,
             tool_calls=tool_calls,
             finish_reason=finish_reason,
-            usage=data.get("usage", {}),
         )
 
     async def embed(self, text: str) -> list[float]:
         """
-        Genera embedding. Usa el modelo de embeddings de OpenAI si el token OAuth
-        da acceso, de lo contrario debería caer al provider local de embeddings.
+        Codex OAuth no da acceso al endpoint de embeddings estándar.
+        Raise NotImplementedError — el sistema debe usar embeddings locales.
         """
-        token = await self.get_token()
-        resp = await self._client.post(
-            f"{self._base_url}/embeddings",
-            headers={"Authorization": f"Bearer {token}"},
-            json={"model": "text-embedding-3-small", "input": text},
+        raise NotImplementedError(
+            "gpt-5.3-codex no provee API de embeddings. "
+            "Usa embedding_provider=local en la config."
         )
-        resp.raise_for_status()
-        return resp.json()["data"][0]["embedding"]
 
     @property
     def model(self) -> str:
