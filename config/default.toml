@@ -1,0 +1,46 @@
+[provider]
+# Opciones: "codex_oauth" | "openai_api" | "anthropic"
+default = "codex_oauth"
+
+[providers.codex_oauth]
+model = "gpt-5.3-codex"
+auth = "oauth"
+base_url = "https://api.openai.com/v1"
+
+[providers.openai_api]
+model = "gpt-4o"
+auth = "api_key"
+env_var = "OPENAI_API_KEY"
+base_url = "https://api.openai.com/v1"
+
+[providers.anthropic]
+model = "claude-opus-4-5"
+auth = "api_key"
+env_var = "ANTHROPIC_API_KEY"
+
+[memory]
+db_path = "data/memory.db"
+# "local" usa sentence-transformers (pip install bbclaud[embeddings])
+# "openai" usa text-embedding-3-small via API
+embedding_provider = "local"
+embedding_model = "all-MiniLM-L6-v2"
+top_k_context = 5
+
+[workspace]
+root = "workspace"
+
+[skills]
+dir = "skills"
+
+[api]
+# Habilitar la API HTTP interna en http://host:port
+enabled = false
+host = "127.0.0.1"
+port = 8765
+
+[agent]
+max_iterations = 20
+command_timeout = 60
+
+[logging]
+level = "INFO"

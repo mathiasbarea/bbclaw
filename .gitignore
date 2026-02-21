@@ -1,0 +1,37 @@
+# Entorno virtual
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Datos y memoria (no versionar)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Logs
+*.log
+
+# Workspace del agente (opcional — versionar si querés)
+# workspace/
+
+# Config con secretos
+.env
+*.env.local
+
+# IDEs
+.vscode/
+.idea/
+*.suo
+
+# OS
+.DS_Store
+Thumbs.db

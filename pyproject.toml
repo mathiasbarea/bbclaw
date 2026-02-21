@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bbclaud"
+version = "0.1.0"
+description = "Sistema de agentes auto-mejorable con memoria y herramientas nativas"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Async I/O
+    "anyio>=4.6",
+    "aiohttp>=3.10",
+    "aiofiles>=24.1",
+
+    # SQLite + vectores
+    "aiosqlite>=0.20",
+    "sqlite-vec>=0.1.6",
+
+    # CLI
+    "rich>=13.9",
+    "click>=8.1",
+
+    # Serialización
+    "pydantic>=2.9",
+
+    # HTTP (OAuth flow + LLM calls)
+    "httpx>=0.27",
+    "keyring>=25.4",
+]
+
+[project.optional-dependencies]
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.32",
+]
+embeddings = [
+    "sentence-transformers>=3.3",
+]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "black>=24.10",
+    "ruff>=0.7",
+]
+all = [
+    "bbclaud[api,embeddings,dev]",
+]
+
+[project.scripts]
+bbclaud = "bbclaud.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["bbclaud*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
