@@ -19,9 +19,11 @@ import json
 import logging
 import os
 import secrets
+import stat
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from threading import Event, Thread
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -99,8 +101,9 @@ class CodexOAuthProvider(LLMProvider):
     Compatible con la interfaz LLMProvider abstracta.
     """
 
-    _MODEL = "gpt-5.3-codex"
+    _MODEL = "codex-mini-latest"
     _BASE_URL = "https://api.openai.com/v1"
+    _TOKEN_FILE = "data/.tokens.json"  # fallback cuando el keyring falla
 
     def __init__(self, base_url: str | None = None):
         self._base_url = base_url or self._BASE_URL
@@ -110,25 +113,49 @@ class CodexOAuthProvider(LLMProvider):
     # ── Auth ──────────────────────────────────────────────────────────────────
 
     def _load_tokens(self) -> dict | None:
-        """Carga tokens desde keyring del OS."""
+        """Carga tokens: primero keyring, luego archivo de fallback."""
+        # 1. Intentar keyring
         try:
             import keyring
-
             raw = keyring.get_password(KEYRING_SERVICE, KEYRING_KEY)
             if raw:
                 return json.loads(raw)
         except Exception as e:
-            logger.warning("No se pudo cargar tokens del keyring: %s", e)
+            logger.debug("Keyring no disponible (%s), probando archivo...", e)
+
+        # 2. Fallback: archivo local
+        try:
+            p = Path(self._TOKEN_FILE)
+            if p.exists():
+                return json.loads(p.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.debug("No se pudo leer archivo de tokens: %s", e)
+
         return None
 
     def _save_tokens(self, tokens: dict) -> None:
-        """Persiste tokens en keyring del OS."""
+        """Guarda tokens: primero keyring, si falla usa archivo."""
+        raw = json.dumps(tokens)
+
+        # 1. Intentar keyring
         try:
             import keyring
-
-            keyring.set_password(KEYRING_SERVICE, KEYRING_KEY, json.dumps(tokens))
+            keyring.set_password(KEYRING_SERVICE, KEYRING_KEY, raw)
+            return  # exito
         except Exception as e:
-            logger.warning("No se pudo guardar tokens en keyring: %s", e)
+            logger.warning("Keyring no disponible (%s), guardando en archivo...", e)
+
+        # 2. Fallback: archivo local
+        try:
+            p = Path(self._TOKEN_FILE)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(raw, encoding="utf-8")
+            # Permisos restrictivos en Windows: solo el usuario actual
+            import stat
+            p.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            logger.info("Tokens guardados en: %s", p)
+        except Exception as e:
+            logger.error("No se pudo guardar tokens: %s", e)
 
     def _is_expired(self, tokens: dict) -> bool:
         """Devuelve True si el access_token está a menos de 60s de expirar."""
