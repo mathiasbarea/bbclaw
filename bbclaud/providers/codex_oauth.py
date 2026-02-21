@@ -35,6 +35,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import httpx
 
 from .base import LLMProvider, LLMResponse, Message, ToolCall
+from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ OPENAI_SCOPE = "openid profile email offline_access"
 CODEX_URL = "https://chatgpt.com/backend-api/codex/responses"
 CODEX_ACCOUNTS_URL = "https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27"
 
-KEYRING_SERVICE = "bbclaud"
+KEYRING_SERVICE = SYSTEM_NAME
 KEYRING_KEY = "codex_oauth_tokens"
 TOKEN_FILE = Path("data/.tokens.json")
 
@@ -484,8 +485,8 @@ class CodexOAuthProvider(LLMProvider):
             "Accept": "text/event-stream",
             "chatgpt-account-id": account_id,
             "OpenAI-Beta": "responses=experimental",
-            "originator": "bbclaud",
-            "User-Agent": "bbclaud (python)",
+            "originator": SYSTEM_NAME,
+            "User-Agent": f"{SYSTEM_NAME} (python)",
         }
 
         async with self._client.stream(

@@ -20,6 +20,7 @@ from ..providers.base import LLMProvider
 from ..providers.codex_oauth import CodexOAuthProvider
 from ..providers.openai_api import OpenAIAPIProvider
 from ..tools.registry import registry
+from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +140,7 @@ class Orchestrator:
             try:
                 subprocess.run(["git", "init"], capture_output=True, check=True)
                 subprocess.run(["git", "add", "-A"], capture_output=True)
-                subprocess.run(["git", "commit", "-m", "chore: initial commit bbclaud"], capture_output=True)
+                subprocess.run(["git", "commit", "-m", f"chore: initial commit {SYSTEM_NAME}"], capture_output=True)
                 logger.info("Git repo inicializado")
             except Exception as e:
                 logger.debug("Git init omitido: %s", e)
@@ -160,7 +161,8 @@ class Orchestrator:
             )
 
         logger.info(
-            "Sistema bbclaud iniciado. Agentes: %s | Workspace: %s | Skills: %s",
+            "Sistema %s iniciado. Agentes: %s | Workspace: %s | Skills: %s",
+            SYSTEM_NAME,
             list(self.agents.keys()),
             workspace,
             loaded_skills,
@@ -263,4 +265,4 @@ class Orchestrator:
             await self.vectors.close()
         if self.provider and hasattr(self.provider, "aclose"):
             await self.provider.aclose()
-        logger.info("Sistema bbclaud detenido.")
+        logger.info("Sistema %s detenido.", SYSTEM_NAME)

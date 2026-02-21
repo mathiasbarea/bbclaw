@@ -42,10 +42,11 @@ def create_app(orchestrator) -> Any:
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
+    from bbclaud.identity import SYSTEM_NAME
 
     app = FastAPI(
-        title="bbclaud API",
-        description="Sistema de agentes auto-mejorable — API HTTP interna",
+        title=f"{SYSTEM_NAME} API",
+        description=f"Sistema de agentes auto-mejorable ({SYSTEM_NAME}) — API HTTP interna",
         version="0.1.0",
     )
 
@@ -70,7 +71,7 @@ def create_app(orchestrator) -> Any:
 
     @app.get("/health")
     async def health():
-        return {"status": "ok", "system": "bbclaud"}
+        return {"status": "ok", "system": SYSTEM_NAME}
 
     @app.post("/chat", response_model=ChatResponse)
     async def chat(req: ChatRequest):

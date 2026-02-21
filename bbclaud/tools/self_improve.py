@@ -6,12 +6,16 @@ el código fuente del propio sistema bbclaud (fuera del workspace normal).
 from __future__ import annotations
 
 import logging
+import asyncio
+import os
+import subprocess
 from pathlib import Path
 
 import aiofiles
 import aiofiles.os
 
-from .registry import registry
+from ..tools.registry import registry
+from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +88,6 @@ async def _list_source(directory: str = ".") -> str:
 
 async def _run_tests(test_path: str = "tests/") -> str:
     """Ejecuta la suite de tests del sistema."""
-    import asyncio
     proc = await asyncio.create_subprocess_shell(
         f"python -m pytest {test_path} -v --tb=short",
         stdout=asyncio.subprocess.PIPE,
@@ -98,7 +101,6 @@ async def _run_tests(test_path: str = "tests/") -> str:
 
 async def _git_commit(message: str) -> str:
     """Hace git add -A y git commit con el mensaje dado."""
-    import asyncio
     cwd = str(get_project_root())
 
     async def _run(cmd: str) -> str:
@@ -109,7 +111,7 @@ async def _git_commit(message: str) -> str:
         return out.decode("utf-8", errors="replace")
 
     add_out = await _run("git add -A")
-    commit_out = await _run(f'git commit -m "{message}"')
+    commit_out = await _run(f"git commit -m '{message}'")
     return f"git add:\n{add_out}\ngit commit:\n{commit_out}"
 
 
@@ -117,7 +119,7 @@ async def _git_commit(message: str) -> str:
 
 registry.register(
     name="read_source",
-    description="Lee un archivo del código fuente del sistema bbclaud (para auto-mejora). Path relativo al root del proyecto.",
+    description=f"Lee un archivo local del codigo fuente del sistema {SYSTEM_NAME} (para auto-mejora). Path relativo al root del proyecto.",
     func=_read_source,
     parameters={
         "type": "object",
@@ -128,13 +130,13 @@ registry.register(
 
 registry.register(
     name="write_source",
-    description="Escribe/modifica un archivo del código fuente del sistema bbclaud. SIEMPRE verificar con run_tests después.",
+    description=f"Escribe/modifica un archivo del código fuente del sistema {SYSTEM_NAME}. SIEMPRE corroborá con run_tests después de usar esto.",
     func=_write_source,
     parameters={
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path relativo al proyecto"},
-            "content": {"type": "string", "description": "Contenido completo del archivo"},
+            "path": {"type": "string", "description": "Path relativo, ej: bbclaud/core/agent.py"},
+            "content": {"type": "string", "description": "Contenido completo a escribir"},
         },
         "required": ["path", "content"],
     },
@@ -142,7 +144,7 @@ registry.register(
 
 registry.register(
     name="list_source",
-    description="Lista archivos del código fuente del sistema bbclaud.",
+    description=f"Lista archivos del código fuente del sistema {SYSTEM_NAME}.",
     func=_list_source,
     parameters={
         "type": "object",
@@ -153,7 +155,7 @@ registry.register(
 
 registry.register(
     name="run_tests",
-    description="Ejecuta los tests del sistema bbclaud. Úsalo siempre después de modificar código fuente.",
+    description=f"Ejecuta los tests del sistema {SYSTEM_NAME}. Úsalo siempre después de modificar el código fuente.",
     func=_run_tests,
     parameters={
         "type": "object",
@@ -172,3 +174,4 @@ registry.register(
         "required": ["message"],
     },
 )
+

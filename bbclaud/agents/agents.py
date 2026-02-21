@@ -8,6 +8,7 @@ from __future__ import annotations
 from ..core.agent import Agent, AgentContext
 from ..providers.base import LLMProvider
 from ..tools.registry import ToolRegistry
+from ..identity import SYSTEM_NAME
 
 
 class CoderAgent(Agent):
@@ -74,13 +75,13 @@ class SelfImproverAgent(Agent):
     """
 
     name = "self_improver"
-    description = "agente de auto-mejora que puede modificar el propio código del sistema bbclaud"
+    description = f"agente de auto-mejora que puede modificar el propio código del sistema {SYSTEM_NAME}"
 
     # El self_improver tiene acceso irrestricto al sistema de archivos
     # (no está limitado al workspace — puede tocar bbclaud/)
 
     def system_prompt(self, context: AgentContext) -> str:
-        base = f"""Eres el agente de auto-mejora de bbclaud. Podés leer y modificar el código fuente del propio sistema para mejorarlo.
+        base = f"""Eres el agente de auto-mejora de {SYSTEM_NAME}. Podés leer y modificar el código fuente del propio sistema para mejorarlo.
 
 Tarea: {context.task_description}
 
@@ -116,7 +117,7 @@ class OrchestratorAgent(Agent):
     description = "sintetizador de resultados multi-agente"
 
     def system_prompt(self, context: AgentContext) -> str:
-        base = f"""Eres el orquestador del sistema bbclaud. Tu trabajo es sintetizar los resultados de múltiples agentes en una respuesta clara y útil para el usuario.
+        base = f"""Eres el orquestador del sistema {SYSTEM_NAME}. Tu trabajo es sintetizar los resultados de múltiples agentes en una respuesta clara y útil para el usuario.
 
 Tarea original del usuario: {context.task_description}
 

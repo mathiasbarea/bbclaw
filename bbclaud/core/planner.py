@@ -7,15 +7,19 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from ..providers.base import LLMProvider, Message
+from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
 
-PLANNER_SYSTEM_PROMPT = """Eres un planificador de tareas para un sistema multi-agente.
+PLANNER_SYSTEM_PROMPT = f"""Eres un planificador de tareas para un sistema multi-agente.
 
 Tu trabajo es analizar la solicitud del usuario y dividirla en subtareas claras.
 Cada subtarea debe:
@@ -24,34 +28,27 @@ Cada subtarea debe:
 - Las tareas sin dependencias se ejecutarán en PARALELO
 
 Agentes disponibles:
-- "coder": Escribe, lee, modifica y ejecuta código. Ideal para programar.
-- "researcher": Busca información, lee documentación, analiza texto.
-- "self_improver": Modifica el propio código del sistema bbclaud.
+- "coder": Escribe código, refactoriza, lee/escribe archivos en el workspace, corre comandos/tests.
+- "researcher": Busca información (web/arquitectura), lee archivos, resume contexto.
+- "self_improver": Modifica el propio código del sistema {SYSTEM_NAME}.
 - "generalist": Para tareas que no encajan en otra categoría.
 
 IMPORTANTE: Si la tarea es simple y no necesita dividirse, devuelve UNA sola subtarea.
 No sobre-dividas. Prefiere planes simples.
 
 Debes responder ÚNICAMENTE con JSON válido, sin texto adicional, siguiendo este schema exacto:
-{
+{{
   "plan_summary": "descripción breve del plan",
   "tasks": [
-    {
+    {{
       "id": "t1",
       "name": "nombre corto",
       "description": "descripción detallada de qué hacer",
       "agent": "coder|researcher|self_improver|generalist",
       "depends_on": []
-    },
-    {
-      "id": "t2",
-      "name": "nombre corto",
-      "description": "descripción detallada",
-      "agent": "coder",
-      "depends_on": ["t1"]
-    }
+    }}
   ]
-}"""
+}}"""
 
 
 @dataclass

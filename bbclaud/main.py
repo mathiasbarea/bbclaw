@@ -18,12 +18,17 @@ from rich.prompt import Prompt
 from rich.text import Text
 
 from bbclaud.core.orchestrator import Orchestrator
+from bbclaud.identity import SYSTEM_NAME
 
 console = Console()
 
-BANNER = """
+def _make_banner() -> str:
+    name_line = f"🤖  {SYSTEM_NAME} — Sistema de Agentes      "
+    pad = max(0, 42 - len(name_line))
+    name_line = f"║   {name_line}{' ' * pad}║"
+    return f"""
 ╔══════════════════════════════════════════╗
-║   🤖  bbclaud — Sistema de Agentes      ║
+{name_line}
 ║         Auto-Mejorable v0.1             ║
 ╚══════════════════════════════════════════╝
 Comandos: /help /tools /history /logout /exit
@@ -54,7 +59,7 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
     """Loop interactivo principal."""
     setup_logging(verbose)
 
-    console.print(BANNER, style="bold cyan")
+    console.print(_make_banner(), style="bold cyan")
     console.print("Iniciando sistema...", style="dim")
 
     await orchestrator.start()
@@ -126,7 +131,7 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
         console.print(
             Panel(
                 Markdown(response),
-                title="[bold green]bbclaud[/bold green]",
+                title=f"[bold green]{SYSTEM_NAME}[/bold green]",
                 border_style="green",
                 padding=(1, 2),
             )
@@ -148,11 +153,11 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
     help="Mostrar logs detallados",
 )
 def cli(config: str, verbose: bool) -> None:
-    """
-    bbclaud — Sistema de agentes auto-mejorable.
+    f"""
+    {SYSTEM_NAME} — Sistema de agentes auto-mejorable.
 
-    Inicia el REPL interactivo. La primera vez abrirá el browser
-    para autenticación OAuth con OpenAI Codex.
+    Inicia el REPL interactivo. La primera vez abrira el browser
+    para autenticacion OAuth con OpenAI Codex.
     """
     orchestrator = Orchestrator(config_path=config)
     try:
