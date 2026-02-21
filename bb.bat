@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-:: ─── bbclaud launcher ─────────────────────────────────────────────────────
+:: ─── bbclaw launcher ─────────────────────────────────────────────────────
 :: Uso: bb           → inicia el REPL
 ::      bb --verbose → logs detallados
 ::      bb --help    → ayuda
@@ -19,9 +19,9 @@ if not exist ".venv\Scripts\python.exe" (
     )
 )
 
-:: 2. Instalar dependencias si bbclaud no está instalado
-if not exist ".venv\Scripts\bbclaud.exe" (
-    echo [bb] Instalando bbclaud...
+:: 2. Instalar dependencias si bbclaw no está instalado
+if not exist ".venv\Scripts\bbclaw.exe" (
+    echo [bb] Instalando bbclaw...
     .venv\Scripts\pip install -e ".[dev]" -q
     if errorlevel 1 (
         echo [bb] ERROR: falló la instalación de dependencias.
@@ -31,5 +31,5 @@ if not exist ".venv\Scripts\bbclaud.exe" (
     echo [bb] ✓ Listo.
 )
 
-:: 3. Lanzar bbclaud con los argumentos recibidos
-.venv\Scripts\bbclaud %*
+:: 3. Lanzar bbclaw con los argumentos recibidos
+.venv\Scripts\bbclaw %*

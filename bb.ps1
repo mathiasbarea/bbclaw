@@ -1,4 +1,4 @@
-# bbclaud launcher - PowerShell
+# bbclaw launcher - PowerShell
 # Uso: .\bb           -> inicia el REPL
 #      .\bb --verbose  -> logs detallados
 #      .\bb --help     -> ayuda
@@ -15,9 +15,9 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
     }
 }
 
-# 2. Instalar bbclaud si no esta
-if (-not (Test-Path ".venv\Scripts\bbclaud.exe")) {
-    Write-Host "[bb] Instalando bbclaud..." -ForegroundColor Cyan
+# 2. Instalar bbclaw si no esta
+if (-not (Test-Path ".venv\Scripts\bbclaw.exe")) {
+    Write-Host "[bb] Instalando bbclaw..." -ForegroundColor Cyan
     & .venv\Scripts\pip install -e ".[dev]" -q
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[bb] ERROR: fallo la instalacion." -ForegroundColor Red
@@ -27,4 +27,4 @@ if (-not (Test-Path ".venv\Scripts\bbclaud.exe")) {
 }
 
 # 3. Lanzar
-& .venv\Scripts\bbclaud @args
+& .venv\Scripts\bbclaw @args

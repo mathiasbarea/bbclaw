@@ -20,7 +20,7 @@ env_var = "ANTHROPIC_API_KEY"
 
 [memory]
 db_path = "data/memory.db"
-# "local" usa sentence-transformers (pip install bbclaud[embeddings])
+# "local" usa sentence-transformers (pip install bbclaw[embeddings])
 # "openai" usa text-embedding-3-small via API
 embedding_provider = "local"
 embedding_model = "all-MiniLM-L6-v2"

@@ -66,14 +66,14 @@ def load_skill(skill_path: Path) -> bool:
     skill_name = skill_path.stem
     try:
         spec = importlib.util.spec_from_file_location(
-            f"bbclaud_skill_{skill_name}", skill_path
+            f"bbclaw_skill_{skill_name}", skill_path
         )
         if spec is None or spec.loader is None:
             logger.warning("No se pudo crear spec para: %s", skill_path)
             return False
 
         module = importlib.util.module_from_spec(spec)
-        sys.modules[f"bbclaud_skill_{skill_name}"] = module
+        sys.modules[f"bbclaw_skill_{skill_name}"] = module
         spec.loader.exec_module(module)
 
         meta = getattr(module, "SKILL_META", {"name": skill_name})
@@ -116,7 +116,7 @@ def _create_example_skill() -> None:
     example.write_text(
         '"""\nSkill de ejemplo — plantilla para crear nuevas herramientas.\n'
         'Copiá este archivo y modificalo para agregar tus propias herramientas.\n"""\n\n'
-        'from bbclaud.tools.registry import registry\n\n'
+        'from bbclaw.tools.registry import registry\n\n'
         'SKILL_META = {\n    "name": "example",\n    "version": "0.1",\n'
         '    "description": "Skill de ejemplo"\n}\n\n\n'
         'async def _hello(name: str = "mundo") -> str:\n'

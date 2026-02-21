@@ -1,5 +1,5 @@
 """
-Agentes especializados para el sistema multi-agente bbclaud.
+Agentes especializados para el sistema multi-agente bbclaw.
 Cada agente tiene un system prompt optimizado para su rol.
 """
 
@@ -71,14 +71,14 @@ Herramientas disponibles: filesystem (solo lectura recomendada) + terminal (para
 class SelfImproverAgent(Agent):
     """
     Agente de auto-mejora. Puede leer y modificar el propio código del sistema.
-    Es el responsable de hacer que bbclaud evolucione con cada interacción.
+    Es el responsable de hacer que bbclaw evolucione con cada interacción.
     """
 
     name = "self_improver"
     description = f"agente de auto-mejora que puede modificar el propio código del sistema {SYSTEM_NAME}"
 
     # El self_improver tiene acceso irrestricto al sistema de archivos
-    # (no está limitado al workspace — puede tocar bbclaud/)
+    # (no está limitado al workspace — puede tocar bbclaw/)
 
     def system_prompt(self, context: AgentContext) -> str:
         base = f"""Eres el agente de auto-mejora de {SYSTEM_NAME}. Podés leer y modificar el código fuente del propio sistema para mejorarlo.

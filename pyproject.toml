@@ -3,7 +3,7 @@ requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bbclaud"
+name = "bbclaw"
 version = "0.1.0"
 description = "Sistema de agentes auto-mejorable con memoria y herramientas nativas"
 readme = "README.md"
@@ -45,15 +45,15 @@ dev = [
     "ruff>=0.7",
 ]
 all = [
-    "bbclaud[api,embeddings,dev]",
+    "bbclaw[api,embeddings,dev]",
 ]
 
 [project.scripts]
-bbclaud = "bbclaud.main:cli"
+bbclaw = "bbclaw.main:cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["bbclaud*"]
+include = ["bbclaw*"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

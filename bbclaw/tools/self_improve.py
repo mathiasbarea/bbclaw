@@ -1,6 +1,6 @@
 """
 Herramientas de auto-mejora — permiten al SelfImproverAgent leer y escribir
-el código fuente del propio sistema bbclaud (fuera del workspace normal).
+el código fuente del propio sistema bbclaw (fuera del workspace normal).
 """
 
 from __future__ import annotations
@@ -123,7 +123,7 @@ registry.register(
     func=_read_source,
     parameters={
         "type": "object",
-        "properties": {"path": {"type": "string", "description": "Path relativo al proyecto, ej: bbclaud/core/agent.py"}},
+        "properties": {"path": {"type": "string", "description": "Path relativo al proyecto, ej: bbclaw/core/agent.py"}},
         "required": ["path"],
     },
 )
@@ -135,7 +135,7 @@ registry.register(
     parameters={
         "type": "object",
         "properties": {
-            "path": {"type": "string", "description": "Path relativo, ej: bbclaud/core/agent.py"},
+            "path": {"type": "string", "description": "Path relativo, ej: bbclaw/core/agent.py"},
             "content": {"type": "string", "description": "Contenido completo a escribir"},
         },
         "required": ["path", "content"],

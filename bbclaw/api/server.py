@@ -42,7 +42,7 @@ def create_app(orchestrator) -> Any:
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic import BaseModel
-    from bbclaud.identity import SYSTEM_NAME
+    from bbclaw.identity import SYSTEM_NAME
 
     app = FastAPI(
         title=f"{SYSTEM_NAME} API",
@@ -90,7 +90,7 @@ def create_app(orchestrator) -> Any:
 
     @app.get("/tools")
     async def tools():
-        from bbclaud.tools.registry import registry
+        from bbclaw.tools.registry import registry
         return {
             "tools": [
                 {"name": name, "schema": schema}
@@ -103,7 +103,7 @@ def create_app(orchestrator) -> Any:
 
     @app.get("/skills")
     async def skills():
-        from bbclaud.skills import list_loaded_skills
+        from bbclaw.skills import list_loaded_skills
         return {"skills": list_loaded_skills()}
 
     @app.get("/agents")
@@ -132,7 +132,7 @@ def create_app(orchestrator) -> Any:
 
     @app.post("/skills/reload")
     async def reload_skills():
-        from bbclaud.skills import load_all_skills
+        from bbclaw.skills import load_all_skills
         loaded = load_all_skills()
         return {"reloaded": loaded}
 

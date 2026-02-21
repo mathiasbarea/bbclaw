@@ -9,9 +9,9 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from bbclaud.providers.base import Message, LLMResponse, ToolCall
-from bbclaud.tools.registry import ToolRegistry, ToolResult
-from bbclaud.core.agent import Agent, AgentContext
+from bbclaw.providers.base import Message, LLMResponse, ToolCall
+from bbclaw.tools.registry import ToolRegistry, ToolResult
+from bbclaw.core.agent import Agent, AgentContext
 
 
 # ── Tools ─────────────────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ async def test_tool_registry_schemas():
 
 @pytest.mark.asyncio
 async def test_filesystem_write_read(tmp_path):
-    from bbclaud.tools.filesystem import set_workspace, _write_file, _read_file
+    from bbclaw.tools.filesystem import set_workspace, _write_file, _read_file
 
     set_workspace(tmp_path)
     await _write_file("test.txt", "hola mundo")
@@ -71,7 +71,7 @@ async def test_filesystem_write_read(tmp_path):
 
 @pytest.mark.asyncio
 async def test_filesystem_sandbox(tmp_path):
-    from bbclaud.tools.filesystem import set_workspace, _read_file
+    from bbclaw.tools.filesystem import set_workspace, _read_file
 
     set_workspace(tmp_path)
     with pytest.raises(ValueError, match="fuera del workspace"):
@@ -82,7 +82,7 @@ async def test_filesystem_sandbox(tmp_path):
 
 @pytest.mark.asyncio
 async def test_db_conversations(tmp_path):
-    from bbclaud.memory.db import Database
+    from bbclaw.memory.db import Database
 
     db = Database(tmp_path / "test.db")
     await db.connect()
@@ -99,7 +99,7 @@ async def test_db_conversations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_db_knowledge(tmp_path):
-    from bbclaud.memory.db import Database
+    from bbclaw.memory.db import Database
 
     db = Database(tmp_path / "test.db")
     await db.connect()

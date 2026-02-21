@@ -1,5 +1,5 @@
 """
-Entry point CLI del sistema bbclaud.
+Entry point CLI del sistema bbclaw.
 REPL interactivo con comandos especiales (/exit, /tools, /history, /logout, /help).
 """
 
@@ -17,8 +17,8 @@ from rich.panel import Panel
 from rich.prompt import Prompt
 from rich.text import Text
 
-from bbclaud.core.orchestrator import Orchestrator
-from bbclaud.identity import SYSTEM_NAME
+from bbclaw.core.orchestrator import Orchestrator
+from bbclaw.identity import SYSTEM_NAME
 
 console = Console()
 
@@ -86,7 +86,7 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
             continue
 
         if user_input.lower() == "/tools":
-            from bbclaud.tools.registry import registry
+            from bbclaw.tools.registry import registry
             tools = registry.list_tools()
             console.print(
                 Panel(

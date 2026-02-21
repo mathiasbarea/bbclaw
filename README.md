@@ -1,12 +1,12 @@
-# bbclaud — Sistema de Agentes Auto-Mejorable
+# bbclaw — Sistema de Agentes Auto-Mejorable
 
 Un sistema de agentes de IA minimalista, local-first y auto-mejorable.
 
 ## Estructura
 
 ```
-bbclaud/
-├── bbclaud/
+bbclaw/
+├── bbclaw/
 │   ├── core/          # Orquestador, clase base Agent
 │   ├── memory/        # SQLite + sqlite-vec (memoria vectorial)
 │   ├── providers/     # Codex OAuth, OpenAI API (extensible)
@@ -35,13 +35,13 @@ pip install -e ".[dev]"
 
 ```bash
 # Iniciar REPL interactivo (la primera vez abre el browser para auth OAuth)
-bbclaud
+bbclaw
 
 # Con configuración alternativa
-bbclaud --config config/mi_config.toml
+bbclaw --config config/mi_config.toml
 
 # Con logs detallados
-bbclaud --verbose
+bbclaw --verbose
 ```
 
 ## Comandos del REPL

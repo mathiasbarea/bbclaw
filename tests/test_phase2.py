@@ -8,13 +8,13 @@ import asyncio
 import pytest
 from unittest.mock import AsyncMock
 
-from bbclaud.providers.base import LLMResponse, ToolCall
-from bbclaud.tools.registry import ToolRegistry
-from bbclaud.core.agent import AgentContext
-from bbclaud.core.planner import Planner, Plan, TaskSpec
-from bbclaud.core.task_queue import TaskQueue
-from bbclaud.core.message_bus import MessageBus, Event
-from bbclaud.agents import CoderAgent, ResearcherAgent, SelfImproverAgent, build_agent_registry
+from bbclaw.providers.base import LLMResponse, ToolCall
+from bbclaw.tools.registry import ToolRegistry
+from bbclaw.core.agent import AgentContext
+from bbclaw.core.planner import Planner, Plan, TaskSpec
+from bbclaw.core.task_queue import TaskQueue
+from bbclaw.core.message_bus import MessageBus, Event
+from bbclaw.agents import CoderAgent, ResearcherAgent, SelfImproverAgent, build_agent_registry
 
 
 # ── MessageBus ────────────────────────────────────────────────────────────────
