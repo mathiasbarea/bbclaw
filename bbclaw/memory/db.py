@@ -131,6 +131,7 @@ class Database:
             "ALTER TABLE improvement_attempts ADD COLUMN changed_files TEXT DEFAULT '[]'",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_next_run ON scheduled_items(next_run_at) WHERE status = 'active'",
             "ALTER TABLE projects ADD COLUMN objective TEXT DEFAULT ''",
+            "ALTER TABLE projects ADD COLUMN last_autonomous_at TEXT",
         ]
         for sql in migrations:
             try:
@@ -304,7 +305,24 @@ class Database:
     async def get_projects_with_objective(self) -> list[dict]:
         return await self.fetchall(
             "SELECT * FROM projects WHERE objective IS NOT NULL AND objective != '' "
-            "ORDER BY last_used_at DESC"
+            "ORDER BY last_autonomous_at ASC NULLS FIRST, last_used_at DESC"
+        )
+
+    async def update_project_last_autonomous(self, project_id: str) -> None:
+        await self.execute(
+            "UPDATE projects SET last_autonomous_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE id = ?",
+            (project_id,),
+        )
+
+    async def get_recent_autonomous_conversations(
+        self, search_term: str, limit: int = 3
+    ) -> list[dict]:
+        return await self.fetchall(
+            "SELECT user_msg, agent_msg, timestamp FROM conversations "
+            "WHERE user_msg LIKE ? "
+            "ORDER BY id DESC LIMIT ?",
+            (f"%{search_term}%", limit),
         )
 
     # ── Improvement Attempts ───────────────────────────────────────────────────

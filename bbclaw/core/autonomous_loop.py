@@ -2,6 +2,10 @@
 Ciclo autónomo de procesamiento de proyectos con objective.
 Corre en background, toma proyectos con objective definido y trabaja en ellos
 cuando el sistema está idle y no hay improvement corriendo.
+
+Frecuencia dinámica: el tick se ajusta según la cantidad de proyectos con
+objective, apuntando a que cada proyecto reciba atención cada
+~target_minutes_per_project minutos (default 30).
 """
 
 from __future__ import annotations
@@ -49,6 +53,60 @@ class AutonomousLoop:
             "lastTickAt": self._last_tick_at,
             "tickMinutes": self._tick_minutes,
         }
+
+    def _compute_tick(self, project_count: int) -> int:
+        """
+        Frecuencia dinámica basada en cantidad de proyectos con objective.
+
+        Lógica: target_per_project / num_projects, con floor y ceiling.
+          - 0 proyectos → ceiling (nada que hacer, tick lento)
+          - 1 proyecto  → target_per_project (ej. 30 min)
+          - 6 proyectos → floor (ej. 5 min)
+
+        Config keys (en [autonomous]):
+          tick_minutes              = 5   (floor — mínimo entre ticks)
+          target_minutes_per_project = 30  (cada cuánto debería atenderse cada proyecto)
+        """
+        cfg = self.orch.config.get("autonomous", {})
+        floor = cfg.get("tick_minutes", 5)
+        ceiling = cfg.get("max_idle_tick_minutes", 60)
+        target = cfg.get("target_minutes_per_project", 30)
+
+        if project_count <= 0:
+            return ceiling
+        return max(floor, min(ceiling, target // project_count))
+
+    async def _build_objective_prompt(self, proj: dict) -> str:
+        """
+        Construye el prompt para el agente autónomo, incluyendo historial
+        de las últimas conversaciones autónomas sobre este proyecto.
+        """
+        lines = [
+            f"Proyecto: {proj['name']}",
+            f"Objetivo: {proj['objective']}",
+        ]
+
+        # Inyectar historial de trabajo previo
+        if self.orch.db:
+            try:
+                recent = await self.orch.db.get_recent_autonomous_conversations(
+                    proj["name"], limit=3
+                )
+                if recent:
+                    lines.append("\n--- Trabajo previo (últimos ciclos) ---")
+                    for conv in reversed(recent):
+                        summary = (conv.get("agent_msg") or "")[:200]
+                        if summary:
+                            lines.append(f"• {summary}")
+                    lines.append("---")
+            except Exception:
+                pass
+
+        lines.append(
+            "\nTrabajá en avanzar este objetivo. "
+            "Hacé un paso concreto y pequeño que NO repita lo ya hecho."
+        )
+        return "\n".join(lines)
 
     async def _process_scheduled_items(self) -> None:
         """Process due scheduled items: fire reminders, run tasks."""
@@ -111,13 +169,22 @@ class AutonomousLoop:
         # Esperar 60s al inicio para que el sistema se estabilice
         await asyncio.sleep(60)
 
-        tick = self.orch.config.get("autonomous", {}).get("tick_minutes", 5)
-        self._tick_minutes = tick
-
         while True:
             try:
-                # Use clock-aligned ticks instead of flat sleep
                 from .scheduler import next_aligned_tick, now_utc, to_iso
+
+                # Tick dinámico: recalcular en cada iteración
+                project_count = 0
+                if self.orch.db:
+                    try:
+                        projs = await self.orch.db.get_projects_with_objective()
+                        project_count = len(projs)
+                    except Exception:
+                        pass
+
+                tick = self._compute_tick(project_count)
+                self._tick_minutes = tick
+
                 target = next_aligned_tick(tick, now_utc())
                 delay = (target - now_utc()).total_seconds()
                 if delay > 0:
@@ -135,27 +202,27 @@ class AutonomousLoop:
                 # Process scheduled items FIRST
                 await self._process_scheduled_items()
 
-                # Obtener proyectos con objective definido
+                # Obtener proyectos con objective (round-robin: least-recently-processed first)
                 projects = await self.orch.db.get_projects_with_objective()
                 if not projects:
                     continue
 
-                # Tomar el más recientemente usado
                 proj = projects[0]
 
                 self._running = True
                 self._current_objective = proj["id"]
                 try:
+                    prompt = await self._build_objective_prompt(proj)
                     result = await asyncio.wait_for(
-                        self.orch.run(
-                            f"Proyecto: {proj['name']}\nObjetivo: {proj['objective']}\n"
-                            "Trabajá en avanzar este objetivo. Hacé un paso concreto y pequeño.",
-                            intent="autonomous",
-                        ),
+                        self.orch.run(prompt, intent="autonomous"),
                         timeout=300,
                     )
+                    # Marcar que este proyecto fue procesado (round-robin)
+                    await self.orch.db.update_project_last_autonomous(proj["id"])
                     logger.info("Autonomous: progreso en proyecto '%s'", proj["name"])
                 except asyncio.TimeoutError:
+                    # Aún así marcar para no bloquear la rotación
+                    await self.orch.db.update_project_last_autonomous(proj["id"])
                     logger.warning("Autonomous: timeout en proyecto '%s'", proj["name"])
                 except Exception as e:
                     logger.error("Error en autonomous loop: %s", e)
