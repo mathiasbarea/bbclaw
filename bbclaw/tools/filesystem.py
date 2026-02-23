@@ -184,6 +184,135 @@ registry.register(
 )
 
 
+async def _edit_file(path: str, old_string: str, new_string: str) -> str:
+    """Edición quirúrgica: reemplaza old_string por new_string en el archivo."""
+    full = _safe_path(path)
+    if not full.exists():
+        raise FileNotFoundError(f"Archivo no encontrado: {path}")
+
+    async with aiofiles.open(full, "r", encoding="utf-8") as f:
+        content = await f.read()
+
+    count = content.count(old_string)
+    if count == 0:
+        raise ValueError(
+            f"old_string not found in {path} — read the file first to get the exact text"
+        )
+    if count > 1:
+        raise ValueError(
+            f"old_string found {count} times in {path} — provide a longer snippet to match exactly once"
+        )
+
+    new_content = content.replace(old_string, new_string, 1)
+    async with aiofiles.open(full, "w", encoding="utf-8") as f:
+        await f.write(new_content)
+
+    # Build preview: show 3 lines of context around the change
+    new_lines = new_content.splitlines()
+    # Find the first line of new_string in the result
+    first_new_line = new_string.splitlines()[0] if new_string else ""
+    center = 0
+    for i, line in enumerate(new_lines):
+        if first_new_line and first_new_line in line:
+            center = i
+            break
+
+    start = max(0, center - 3)
+    end = min(len(new_lines), center + 4)
+    preview = "\n".join(
+        f"  {i + 1:4d} | {new_lines[i]}" for i in range(start, end)
+    )
+    return f"Edited {path} successfully.\nPreview:\n{preview}"
+
+
+_SKIP_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".tox", ".mypy_cache"}
+_BINARY_EXTS = {".pyc", ".pyo", ".exe", ".dll", ".so", ".dylib", ".zip", ".tar", ".gz", ".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".db", ".sqlite"}
+
+
+async def _search_files(pattern: str, directory: str = ".", max_results: int = 20) -> str:
+    """Grep recursivo dentro del workspace."""
+    base = _safe_path(directory)
+    if not base.exists():
+        raise FileNotFoundError(f"Directorio no encontrado: {directory}")
+
+    compiled = re.compile(pattern)
+    results: list[str] = []
+
+    for item in base.rglob("*"):
+        if len(results) >= max_results:
+            break
+        # Skip directories and binary files
+        if item.is_dir():
+            continue
+        if any(p in _SKIP_DIRS for p in item.parts):
+            continue
+        if item.suffix.lower() in _BINARY_EXTS:
+            continue
+
+        try:
+            async with aiofiles.open(item, "r", encoding="utf-8", errors="ignore") as f:
+                lines = await f.readlines()
+            for lineno, line in enumerate(lines, 1):
+                if compiled.search(line):
+                    rel = item.relative_to(_WORKSPACE_ROOT)
+                    results.append(f"{rel}:{lineno}: {line.rstrip()}")
+                    if len(results) >= max_results:
+                        break
+        except (OSError, UnicodeDecodeError):
+            continue
+
+    if not results:
+        return f"No matches found for pattern: {pattern}"
+    header = f"Found {len(results)} match(es):\n"
+    return header + "\n".join(results)
+
+
+registry.register(
+    name="edit_file",
+    description=(
+        "Edición quirúrgica: reemplaza old_string por new_string en un archivo. "
+        "old_string debe aparecer exactamente 1 vez. Si no se encuentra o aparece "
+        "múltiples veces, lanza error. Usar read_file primero para obtener el texto exacto."
+    ),
+    func=_edit_file,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Ruta relativa al workspace del archivo a editar"},
+            "old_string": {"type": "string", "description": "Texto exacto a buscar y reemplazar (debe aparecer 1 sola vez)"},
+            "new_string": {"type": "string", "description": "Texto de reemplazo"},
+        },
+        "required": ["path", "old_string", "new_string"],
+    },
+)
+
+registry.register(
+    name="search_files",
+    description=(
+        "Busca un patrón regex en todos los archivos del workspace (grep recursivo). "
+        "Retorna path:lineno:contenido. Útil para encontrar definiciones, usos, o texto."
+    ),
+    func=_search_files,
+    parameters={
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string", "description": "Patrón regex a buscar"},
+            "directory": {
+                "type": "string",
+                "description": "Subdirectorio donde buscar (relativo al workspace). Default: raíz.",
+                "default": ".",
+            },
+            "max_results": {
+                "type": "integer",
+                "description": "Máximo de resultados a retornar. Default: 20.",
+                "default": 20,
+            },
+        },
+        "required": ["pattern"],
+    },
+)
+
+
 async def _check_path(path: str) -> str:
     """
     Verifica si un path existe en el sistema de archivos.

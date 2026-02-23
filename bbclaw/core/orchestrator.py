@@ -275,7 +275,7 @@ class Orchestrator:
         logger.info("Plan: '%s' (%d tareas)", plan.summary, len(plan.tasks))
 
         # 3. Ejecutar plan
-        plan = await self.task_queue.execute(plan)
+        plan = await self.task_queue.execute(plan, memory_context=memory_ctx)
 
         # 4. Sintetizar respuesta
         response = await self._synthesize(user_input, plan)

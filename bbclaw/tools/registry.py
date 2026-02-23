@@ -7,16 +7,15 @@ Genera schemas JSON compatibles con la spec de OpenAI tool calling.
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
 
 _MUTATING_TOOLS: set[str] = {
-    "write_file", "write_source", "append_file", "delete_file", "make_dir",
+    "write_file", "write_source", "append_file", "delete_file", "make_dir", "edit_file",
 }
 _auto_commit_enabled: bool = False
 
@@ -32,9 +31,45 @@ _TOOL_VERBS: dict[str, str] = {
     "append_file": "append to",
     "delete_file": "delete",
     "make_dir": "create dir",
+    "edit_file": "edit",
 }
 
 _READ_TOOLS_WITH_PATH = {"read_file", "read_source"}
+
+_VERIFY_TOOLS = {"write_file", "edit_file", "write_source"}
+_EXT_VERIFY_CMD: dict[str, list[str]] = {
+    ".py": ["python", "-m", "py_compile"],
+}
+
+
+async def _auto_verify(tool_name: str, kwargs: dict) -> str | None:
+    """Best-effort syntax check after a mutating file operation. Returns warning string or None."""
+    path_arg = kwargs.get("path", "")
+    if not path_arg:
+        return None
+    ext = Path(path_arg).suffix.lower()
+    cmd_prefix = _EXT_VERIFY_CMD.get(ext)
+    if not cmd_prefix:
+        return None
+    # Resolve the actual file path (could be relative to workspace)
+    try:
+        from .filesystem import _safe_path
+        full_path = str(_safe_path(path_arg))
+    except Exception:
+        full_path = path_arg
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd_prefix, full_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+        if proc.returncode != 0:
+            err_text = stderr.decode(errors="replace").strip()[:300]
+            return f"\n⚠️ SYNTAX ERROR detected after writing {path_arg}:\n{err_text}\nFix the error before continuing."
+    except (asyncio.TimeoutError, FileNotFoundError, OSError):
+        pass  # best-effort — don't block the agent
+    return None
 
 
 async def _auto_commit(tool_name: str, kwargs: dict) -> None:

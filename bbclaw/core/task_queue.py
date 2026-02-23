@@ -31,13 +31,15 @@ class TaskQueue:
         e.g. {"coder": CoderAgent(...), "researcher": ResearcherAgent(...)}
         """
         self.agents = agents
+        self._memory_context: str = ""
 
-    async def execute(self, plan: Plan) -> Plan:
+    async def execute(self, plan: Plan, memory_context: str = "") -> Plan:
         """
         Ejecuta todas las tareas del plan respetando dependencias.
         Modifica el plan in-place (status, result, error de cada TaskSpec).
         Devuelve el plan con resultados completos.
         """
+        self._memory_context = memory_context
         completed_ids: set[str] = set()
 
         await bus.publish(Event("plan.started", "task_queue", {"plan_id": plan.id, "tasks": len(plan.tasks)}))
@@ -103,10 +105,18 @@ class TaskQueue:
         # Enriquecer la descripción con resultados de dependencias
         dep_context = self._build_dependency_context(task, plan)
 
+        # Combinar memory context (del orchestrator) + dependency context
+        combined_context_parts = []
+        if self._memory_context:
+            combined_context_parts.append(self._memory_context)
+        if dep_context:
+            combined_context_parts.append(dep_context)
+        combined_context = "\n\n".join(combined_context_parts)
+
         ctx = AgentContext(
             task_id=task.id,
             task_description=task.description,
-            memory_context=dep_context,
+            memory_context=combined_context,
         )
 
         try:
@@ -129,13 +139,26 @@ class TaskQueue:
 
     def _build_dependency_context(self, task: TaskSpec, plan: Plan) -> str:
         """Construye contexto con resultados de las tareas de las que depende."""
-        if not task.depends_on:
-            return ""
+        parts = []
 
-        parts = ["## Resultados de tareas previas\n"]
+        # Siempre incluir la solicitud original para dar contexto global
+        if plan.original_request:
+            parts.append(f"## Solicitud original del usuario\n{plan.original_request}\n")
+
+        if not task.depends_on:
+            return "\n".join(parts) if parts else ""
+
+        parts.append("## Resultados de tareas previas\n")
         for dep_id in task.depends_on:
             dep = next((t for t in plan.tasks if t.id == dep_id), None)
-            if dep and dep.result:
-                parts.append(f"### {dep.name} ({dep_id})\n{dep.result[:1000]}\n")
+            if not dep:
+                continue
+            if dep.status == "done" and dep.result:
+                parts.append(f"### {dep.name} ({dep_id}) — OK\n{dep.result[:3000]}\n")
+            elif dep.status == "failed":
+                parts.append(
+                    f"### {dep.name} ({dep_id}) — FALLÓ\n"
+                    f"Error: {dep.error or 'desconocido'}\n"
+                )
 
-        return "\n".join(parts) if len(parts) > 1 else ""
+        return "\n".join(parts) if len(parts) > 1 else (parts[0] if parts else "")
