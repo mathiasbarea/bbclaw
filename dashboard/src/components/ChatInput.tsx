@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Command } from 'lucide-react';
 import { AgentAvatar } from './AgentAvatar';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 
 interface ChatMessage {
     id: string;
@@ -136,12 +134,14 @@ export function ChatInput({
     onSendMessage,
     agents = [],
     projects = [],
+    activeProjectName = null,
     requestCompletions = [],
     apiBaseUrl = '',
 }: {
     onSendMessage: (msg: string, sessionId?: string) => Promise<SendMessageResult>;
     agents?: { name: string; role: string }[];
-    projects?: { name: string; slug: string }[];
+    projects?: { name: string }[];
+    activeProjectName?: string | null;
     requestCompletions?: RequestCompletionMessage[];
     apiBaseUrl?: string;
 }) {
@@ -159,7 +159,6 @@ export function ChatInput({
     const [history, setHistory] = useState<ChatMessage[]>([]);
     const [pendingRequests, setPendingRequests] = useState<PendingRequestItem[]>([]);
     const [sessionId, setSessionId] = useState<string | null>(null);
-    const suppressHistoryReloadRef = useRef(false);
     const [historyNextCursor, setHistoryNextCursor] = useState<string | null>(null);
     const [historyHasMore, setHistoryHasMore] = useState(false);
     const [isLoadingOlder, setIsLoadingOlder] = useState(false);
@@ -175,10 +174,7 @@ export function ChatInput({
     const filteredItems = mentionType === 'agent'
         ? agents.filter(a => a.name.toLowerCase().includes(mentionQuery.toLowerCase()))
         : mentionType === 'project'
-            ? projects.filter(p =>
-                p.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
-                p.slug.toLowerCase().includes(mentionQuery.toLowerCase())
-              )
+            ? projects.filter(p => p.name.toLowerCase().includes(mentionQuery.toLowerCase()))
             : [];
 
     const updateMentionStateFromValue = useCallback((val: string) => {
@@ -252,13 +248,6 @@ export function ChatInput({
     }, [isVisible]);
 
     useEffect(() => {
-        // Skip reload when sessionId changed as a result of sending a message
-        // (the local state already has the latest messages with typewriter animation)
-        if (suppressHistoryReloadRef.current) {
-            suppressHistoryReloadRef.current = false;
-            return;
-        }
-
         let canceled = false;
 
         const loadHistory = async (): Promise<void> => {
@@ -488,10 +477,7 @@ export function ChatInput({
                 setSelectedIndex(s => (s - 1 + filteredItems.length) % filteredItems.length);
             } else if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
-                const selectedItem = filteredItems[selectedIndex];
-                const selected = mentionType === 'project'
-                    ? (selectedItem as { slug: string }).slug
-                    : selectedItem.name;
+                const selected = filteredItems[selectedIndex].name;
                 const bef = input.slice(0, mentionIndex);
                 const aft = input.slice(mentionIndex + 1 + mentionQuery.length);
                 const prefix = mentionType === 'agent' ? '@' : '#';
@@ -530,7 +516,6 @@ export function ChatInput({
 
         const response = await onSendMessage(userMsg, sessionId || undefined);
         if (response?.sessionId && response.sessionId !== sessionId) {
-            suppressHistoryReloadRef.current = true;
             setSessionId(response.sessionId);
         }
         const responseText = response?.text || 'Instruction received and routed.';
@@ -695,13 +680,11 @@ export function ChatInput({
                                             whiteSpace: 'pre-wrap',
                                             minWidth: 0,
                                         }}>
-                                            <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+                                            <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
                                                 {msgAction.role === 'system' && <span style={{ opacity: 0.5, marginRight: '8px' }}>&gt;</span>}
                                                 {msgAction.typewriter
                                                     ? <TypewriterText text={msgAction.text} onComplete={() => handleTypewriterComplete(msgAction.id)} />
-                                                    : msgAction.role === 'system'
-                                                        ? <ChatMarkdown content={msgAction.text} />
-                                                        : msgAction.text}
+                                                    : msgAction.text}
                                             </div>
                                             <div
                                                 style={{
@@ -737,7 +720,7 @@ export function ChatInput({
                                     value={input}
                                     onChange={handleChange}
                                     onKeyDown={handleInputKeyDown}
-                                    placeholder="Ask the orchestrator, mention #project..."
+                                    placeholder="Ask the orchestrator, mention @agent or #project..."
                                     disabled={isSending}
                                     style={{ width: '100%' }}
                                 />
@@ -775,10 +758,7 @@ export function ChatInput({
                                                         const bef = input.slice(0, mentionIndex);
                                                         const aft = input.slice(mentionIndex + 1 + mentionQuery.length);
                                                         const prefix = mentionType === 'agent' ? '@' : '#';
-                                                        const insertValue = mentionType === 'project'
-                                                            ? (item as { slug: string }).slug
-                                                            : item.name;
-                                                        setInput(bef + prefix + insertValue + ' ' + aft);
+                                                        setInput(bef + prefix + item.name + ' ' + aft);
                                                         setMentionIndex(-1);
                                                         setMentionType(null);
                                                         if (inputRef.current) inputRef.current.focus();
@@ -788,7 +768,6 @@ export function ChatInput({
                                                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                         <span style={{ fontSize: '1rem', fontWeight: 500, color: '#fff', fontFamily: 'Outfit, sans-serif' }}>{item.name}</span>
                                                         {mentionType === 'agent' && <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{(item as any).role}</span>}
-                                                        {mentionType === 'project' && <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>#{(item as any).slug}</span>}
                                                     </div>
                                                 </div>
                                             ))}
@@ -801,8 +780,21 @@ export function ChatInput({
 
                             </form>
 
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', padding: '0 6px' }}>
-                                Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>#</strong> project mention.
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px', fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>
+                                <span>
+                                    Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>@</strong> agent, <strong>#</strong> project
+                                </span>
+                                <span style={{
+                                    padding: '0.15rem 0.5rem',
+                                    borderRadius: '999px',
+                                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                                    background: 'rgba(99, 102, 241, 0.1)',
+                                    color: 'rgba(199, 210, 254, 0.9)',
+                                    fontSize: '0.68rem',
+                                    letterSpacing: '0.02em',
+                                }}>
+                                    {activeProjectName ? `# ${activeProjectName}` : 'System'}
+                                </span>
                             </div>
 
                             {pendingRequests.length > 0 && (
@@ -829,72 +821,30 @@ export function ChatInput({
     );
 }
 
-// Compact markdown renderer for chat bubbles
-const chatMarkdownComponents = {
-    h1: ({ children, ...props }: any) => <div style={{ fontSize: '1.05em', fontWeight: 700, margin: '0.4em 0 0.2em' }} {...props}>{children}</div>,
-    h2: ({ children, ...props }: any) => <div style={{ fontSize: '1em', fontWeight: 700, margin: '0.4em 0 0.2em' }} {...props}>{children}</div>,
-    h3: ({ children, ...props }: any) => <div style={{ fontSize: '0.95em', fontWeight: 600, margin: '0.3em 0 0.15em' }} {...props}>{children}</div>,
-    h4: ({ children, ...props }: any) => <div style={{ fontSize: '0.9em', fontWeight: 600, margin: '0.25em 0 0.1em' }} {...props}>{children}</div>,
-    p: ({ children, ...props }: any) => <div style={{ margin: '0.3em 0' }} {...props}>{children}</div>,
-    ul: ({ children, ...props }: any) => <ul style={{ margin: '0.25em 0', paddingLeft: '1.3em' }} {...props}>{children}</ul>,
-    ol: ({ children, ...props }: any) => <ol style={{ margin: '0.25em 0', paddingLeft: '1.3em' }} {...props}>{children}</ol>,
-    li: ({ children, ...props }: any) => <li style={{ margin: '0.1em 0' }} {...props}>{children}</li>,
-    strong: ({ children, ...props }: any) => <strong style={{ fontWeight: 600, color: '#fff' }} {...props}>{children}</strong>,
-    em: ({ children, ...props }: any) => <em style={{ fontStyle: 'italic', opacity: 0.9 }} {...props}>{children}</em>,
-    code: ({ inline, children, ...props }: any) =>
-        inline !== false && !props.className ? (
-            <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0.1em 0.35em', borderRadius: '4px', fontSize: '0.88em', fontFamily: 'monospace' }} {...props}>{children}</code>
-        ) : (
-            <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '0.5em 0.7em', borderRadius: '6px', fontSize: '0.85em', overflowX: 'auto', margin: '0.3em 0' }}><code {...props}>{children}</code></pre>
-        ),
-    a: ({ children, ...props }: any) => <a style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
-    blockquote: ({ children, ...props }: any) => <blockquote style={{ borderLeft: '3px solid rgba(99,102,241,0.4)', paddingLeft: '0.7em', margin: '0.3em 0', opacity: 0.85 }} {...props}>{children}</blockquote>,
-    table: ({ children, ...props }: any) => <div style={{ overflowX: 'auto', margin: '0.3em 0' }}><table style={{ borderCollapse: 'collapse', fontSize: '0.88em', width: '100%' }} {...props}>{children}</table></div>,
-    th: ({ children, ...props }: any) => <th style={{ border: '1px solid rgba(255,255,255,0.12)', padding: '0.3em 0.5em', fontWeight: 600, textAlign: 'left' }} {...props}>{children}</th>,
-    td: ({ children, ...props }: any) => <td style={{ border: '1px solid rgba(255,255,255,0.08)', padding: '0.3em 0.5em' }} {...props}>{children}</td>,
-    hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', margin: '0.5em 0' }} />,
-};
-
-function ChatMarkdown({ content }: { content: string }) {
-    return (
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
-            {content}
-        </ReactMarkdown>
-    );
-}
-
 // Helper component for typewriter effect on new system messages
 function TypewriterText({ text, onComplete }: { text: string; onComplete: () => void }) {
     const [displayed, setDisplayed] = useState("");
-    const onCompleteRef = useRef(onComplete);
-    onCompleteRef.current = onComplete;
 
     useEffect(() => {
         let i = 0;
-        setDisplayed("");
         const timer = setInterval(() => {
             setDisplayed(() => {
                 const next = text.slice(0, i + 1);
                 i++;
                 if (i >= text.length) {
                     clearInterval(timer);
-                    onCompleteRef.current();
+                    onComplete();
                 }
                 return next;
             });
         }, 30);
         return () => clearInterval(timer);
-    }, [text]);
-
-    const isComplete = displayed.length >= text.length;
+    }, [text, onComplete]);
 
     return (
         <>
-            {isComplete
-                ? <ChatMarkdown content={displayed} />
-                : displayed
-            }
-            {!isComplete && (
+            {displayed}
+            {displayed.length < text.length && (
                 <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} style={{ display: 'inline-block', width: '8px', height: '14px', background: 'var(--accent-primary)', marginLeft: '4px', verticalAlign: 'middle' }} />
             )}
         </>

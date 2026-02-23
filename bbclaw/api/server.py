@@ -278,13 +278,13 @@ def create_app(orchestrator) -> Any:
         imp = getattr(orchestrator, "_improvement_loop", None)
         auto = getattr(orchestrator, "_autonomous_loop", None)
 
-        # Obtener conteos reales de objectives y scheduled items
-        active_objectives = 0
+        # Obtener conteos reales de proyectos con objective y scheduled items
+        projects_with_objective = 0
         active_scheduled = 0
         try:
             db = _db()
-            objs = await db.get_objectives(status="active")
-            active_objectives = len(objs)
+            projs_with_obj = await db.get_projects_with_objective()
+            projects_with_objective = len(projs_with_obj)
             sched = await db.get_scheduled_items(status="active")
             active_scheduled = len(sched)
         except Exception:
@@ -309,7 +309,7 @@ def create_app(orchestrator) -> Any:
                     "lastTickAt": None,
                     "tickMinutes": 5,
                 }),
-                "activeObjectives": active_objectives,
+                "projectsWithObjective": projects_with_objective,
                 "activeScheduledItems": active_scheduled,
             },
             "behavioralSuite": {
@@ -447,12 +447,17 @@ def create_app(orchestrator) -> Any:
         if _current_session and getattr(_current_session, "active_project_id", None):
             db = _db()
             project = await db.fetchone(
-                "SELECT id, name, slug FROM projects WHERE id = ?",
+                "SELECT id, name, slug, objective FROM projects WHERE id = ?",
                 (_current_session.active_project_id,),
             )
             if project:
-                return {"id": project["id"], "name": project["name"], "slug": project["slug"]}
-        return {"id": None, "name": None, "slug": None}
+                return {
+                    "id": project["id"],
+                    "name": project["name"],
+                    "slug": project["slug"],
+                    "objective": project.get("objective") or "",
+                }
+        return {"id": None, "name": None, "slug": None, "objective": ""}
 
     # ── Task Templates (stub) ─────────────────────────────────────────────────
 

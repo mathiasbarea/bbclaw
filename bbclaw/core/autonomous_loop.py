@@ -1,6 +1,6 @@
 """
-Ciclo autónomo de procesamiento de objectives.
-Corre en background, toma objectives activos y trabaja en ellos
+Ciclo autónomo de procesamiento de proyectos con objective.
+Corre en background, toma proyectos con objective definido y trabaja en ellos
 cuando el sistema está idle y no hay improvement corriendo.
 """
 
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class AutonomousLoop:
-    """Background loop que procesa objectives activos."""
+    """Background loop que procesa proyectos con objective definido."""
 
     def __init__(self, orchestrator: Orchestrator):
         self.orch = orchestrator
@@ -135,33 +135,28 @@ class AutonomousLoop:
                 # Process scheduled items FIRST
                 await self._process_scheduled_items()
 
-                # Obtener objectives activos
-                objectives = await self.orch.db.get_objectives(status="active")
-                if not objectives:
+                # Obtener proyectos con objective definido
+                projects = await self.orch.db.get_projects_with_objective()
+                if not projects:
                     continue
 
-                # Tomar el de mayor prioridad (menor número = más prioridad)
-                obj = sorted(objectives, key=lambda o: o.get("priority", 3))[0]
+                # Tomar el más recientemente usado
+                proj = projects[0]
 
                 self._running = True
-                self._current_objective = obj["id"]
+                self._current_objective = proj["id"]
                 try:
                     result = await asyncio.wait_for(
                         self.orch.run(
-                            f"Trabajá en este objetivo: {obj['description']}. "
-                            f"Progreso previo: {obj.get('progress', 'ninguno')}",
+                            f"Proyecto: {proj['name']}\nObjetivo: {proj['objective']}\n"
+                            "Trabajá en avanzar este objetivo. Hacé un paso concreto y pequeño.",
                             intent="autonomous",
                         ),
-                        timeout=300,  # 5 min max
+                        timeout=300,
                     )
-                    # Actualizar progreso
-                    progress = str(result)[:500] if result else ""
-                    await self.orch.db.update_objective_status(
-                        obj["id"], "active", progress=progress
-                    )
-                    logger.info("Autonomous: progreso en objective '%s'", obj["id"])
+                    logger.info("Autonomous: progreso en proyecto '%s'", proj["name"])
                 except asyncio.TimeoutError:
-                    logger.warning("Autonomous: timeout en objective '%s'", obj["id"])
+                    logger.warning("Autonomous: timeout en proyecto '%s'", proj["name"])
                 except Exception as e:
                     logger.error("Error en autonomous loop: %s", e)
                 finally:

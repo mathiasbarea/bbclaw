@@ -72,16 +72,6 @@ CREATE TABLE IF NOT EXISTS improvement_attempts (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
-CREATE TABLE IF NOT EXISTS objectives (
-    id          TEXT PRIMARY KEY,
-    description TEXT NOT NULL,
-    priority    INTEGER DEFAULT 3,
-    status      TEXT DEFAULT 'active',
-    progress    TEXT DEFAULT '',
-    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-);
-
 CREATE TABLE IF NOT EXISTS scheduled_items (
     id          TEXT PRIMARY KEY,
     item_type   TEXT NOT NULL DEFAULT 'task',
@@ -139,10 +129,8 @@ class Database:
             "ALTER TABLE improvement_attempts ADD COLUMN merged INTEGER DEFAULT 0",
             "ALTER TABLE improvement_attempts ADD COLUMN error TEXT",
             "ALTER TABLE improvement_attempts ADD COLUMN changed_files TEXT DEFAULT '[]'",
-            "ALTER TABLE objectives ADD COLUMN priority INTEGER DEFAULT 3",
-            "ALTER TABLE objectives ADD COLUMN progress TEXT DEFAULT ''",
-            "ALTER TABLE objectives ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
             "CREATE INDEX IF NOT EXISTS idx_scheduled_next_run ON scheduled_items(next_run_at) WHERE status = 'active'",
+            "ALTER TABLE projects ADD COLUMN objective TEXT DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -272,6 +260,7 @@ class Database:
         slug: str | None = None,
         description: str | None = None,
         color: str | None = None,
+        objective: str | None = None,
     ) -> None:
         fields, vals = [], []
         if name is not None:
@@ -286,6 +275,9 @@ class Database:
         if color is not None:
             fields.append("color = ?")
             vals.append(color)
+        if objective is not None:
+            fields.append("objective = ?")
+            vals.append(objective)
         if not fields:
             return
         vals.append(project_id)
@@ -303,6 +295,17 @@ class Database:
 
     async def delete_project(self, project_id: str) -> None:
         await self.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+    async def update_project_objective(self, project_id: str, objective: str) -> None:
+        await self.execute(
+            "UPDATE projects SET objective = ? WHERE id = ?", (objective, project_id),
+        )
+
+    async def get_projects_with_objective(self) -> list[dict]:
+        return await self.fetchall(
+            "SELECT * FROM projects WHERE objective IS NOT NULL AND objective != '' "
+            "ORDER BY last_used_at DESC"
+        )
 
     # ── Improvement Attempts ───────────────────────────────────────────────────
 
@@ -329,40 +332,6 @@ class Database:
             "WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hour')"
         )
         return row["total"] if row else 0
-
-    # ── Objectives ─────────────────────────────────────────────────────────────
-
-    async def get_objectives(self, status: str | None = None) -> list[dict]:
-        if status:
-            return await self.fetchall(
-                "SELECT * FROM objectives WHERE status = ? ORDER BY priority ASC, created_at DESC",
-                (status,),
-            )
-        return await self.fetchall(
-            "SELECT * FROM objectives ORDER BY priority ASC, created_at DESC"
-        )
-
-    async def add_objective(self, obj_id: str, description: str, priority: int = 3) -> None:
-        await self.execute(
-            "INSERT INTO objectives (id, description, priority) VALUES (?, ?, ?)",
-            (obj_id, description, priority),
-        )
-
-    async def update_objective_status(
-        self, obj_id: str, status: str, progress: str | None = None
-    ) -> None:
-        if progress is not None:
-            await self.execute(
-                "UPDATE objectives SET status = ?, progress = ?, "
-                "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
-                (status, progress, obj_id),
-            )
-        else:
-            await self.execute(
-                "UPDATE objectives SET status = ?, "
-                "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
-                (status, obj_id),
-            )
 
     # ── Scheduled Items ────────────────────────────────────────────────────────
 

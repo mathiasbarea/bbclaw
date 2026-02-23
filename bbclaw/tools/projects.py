@@ -83,10 +83,12 @@ async def list_projects() -> str:
     for p in projects:
         active_mark = " [ACTIVO]" if p["id"] == active_id else ""
         desc = (p.get("description") or "")[:60]
+        obj = (p.get("objective") or "")[:80]
         lines.append(
             f"  • {p['name']}{active_mark}\n"
             f"    slug: {p['slug']} | workspace: {p['workspace_path']}"
             + (f"\n    {desc}" if desc else "")
+            + (f"\n    🎯 Objective: {obj}" if obj else "")
         )
     return "\n".join(lines)
 
@@ -358,3 +360,90 @@ async def delete_project(name_or_slug: str) -> str:
         f"Proyecto '{project['name']}' eliminado.\n"
         f"Nota: el directorio '{project['workspace_path']}' no fue borrado."
     )
+
+
+@registry.tool(
+    name="set_project_objective",
+    description=(
+        "Define o actualiza el objective de un proyecto. "
+        "Si no se especifica proyecto, usa el proyecto activo."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "objective": {
+                "type": "string",
+                "description": "Texto del objetivo a definir. Vacío para limpiar.",
+            },
+            "name_or_slug": {
+                "type": "string",
+                "description": "Nombre o slug del proyecto (opcional, usa el activo si se omite).",
+            },
+        },
+        "required": ["objective"],
+    },
+)
+async def set_project_objective(objective: str, name_or_slug: str = "") -> str:
+    from bbclaw.memory.db import get_db
+    db = get_db()
+
+    if name_or_slug:
+        project, candidates = await _find_project(name_or_slug)
+        if project is None:
+            if candidates:
+                slugs = ", ".join(p["slug"] for p in candidates)
+                return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
+            return f"Proyecto no encontrado: '{name_or_slug}'."
+    else:
+        active_id = getattr(_current_session, "active_project_id", None)
+        if not active_id:
+            return "No hay proyecto activo. Especificá un proyecto o activá uno con switch_project."
+        project = await db.fetchone("SELECT * FROM projects WHERE id = ?", (active_id,))
+        if not project:
+            return "Proyecto activo no encontrado en la base de datos."
+
+    await db.update_project_objective(project["id"], objective)
+    if objective:
+        return f"Objective del proyecto '{project['name']}' actualizado: {objective}"
+    return f"Objective del proyecto '{project['name']}' eliminado."
+
+
+@registry.tool(
+    name="get_project_objective",
+    description=(
+        "Obtiene el objective del proyecto activo o de uno especificado."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "name_or_slug": {
+                "type": "string",
+                "description": "Nombre o slug del proyecto (opcional, usa el activo si se omite).",
+            },
+        },
+        "required": [],
+    },
+)
+async def get_project_objective(name_or_slug: str = "") -> str:
+    from bbclaw.memory.db import get_db
+    db = get_db()
+
+    if name_or_slug:
+        project, candidates = await _find_project(name_or_slug)
+        if project is None:
+            if candidates:
+                slugs = ", ".join(p["slug"] for p in candidates)
+                return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
+            return f"Proyecto no encontrado: '{name_or_slug}'."
+    else:
+        active_id = getattr(_current_session, "active_project_id", None)
+        if not active_id:
+            return "No hay proyecto activo. Especificá un proyecto o activá uno con switch_project."
+        project = await db.fetchone("SELECT * FROM projects WHERE id = ?", (active_id,))
+        if not project:
+            return "Proyecto activo no encontrado en la base de datos."
+
+    obj = project.get("objective") or ""
+    if obj:
+        return f"Proyecto '{project['name']}' — Objective: {obj}"
+    return f"Proyecto '{project['name']}' no tiene objective definido."

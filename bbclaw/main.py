@@ -39,8 +39,9 @@ HELP_TEXT = """
 - `/help`              — muestra esta ayuda
 - `/tools`             — lista herramientas disponibles
 - `/history`           — muestra últimas conversaciones
-- `/objectives list`   — listar objectives activos
-- `/objectives add <desc>` — agregar nuevo objective
+- `/objective`             — ver objective del proyecto activo
+- `/objective set <texto>` — definir objective del proyecto activo
+- `/objective clear`       — eliminar objective del proyecto activo
 - `/improvements [N]`  — últimos N improvement attempts (default 5)
 - `/schedule list`     — listar tareas/reminders programados
 - `/schedule upcoming` — próximas ejecuciones
@@ -153,39 +154,48 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
                 await orchestrator.provider.logout()
             continue
 
-        # /objectives list | add <desc>
-        if user_input.lower().startswith("/objectives"):
+        # /objective [show|set <texto>|clear]
+        if user_input.lower().startswith("/objective"):
             parts = user_input.split(maxsplit=2)
-            sub = parts[1].lower() if len(parts) > 1 else "list"
+            sub = parts[1].lower() if len(parts) > 1 else "show"
 
-            if sub == "list":
-                if orchestrator.db:
-                    objs = await orchestrator.db.get_objectives()
-                    if objs:
-                        lines = []
-                        for o in objs:
-                            status_icon = {"active": "🟢", "paused": "⏸️", "done": "✅"}.get(o["status"], "⚪")
-                            lines.append(
-                                f"{status_icon} **{o['id']}** (p{o['priority']}) — {o['description']}"
-                            )
-                            if o.get("progress"):
-                                lines.append(f"   ↳ Progreso: {o['progress'][:100]}")
-                        console.print(Panel(
-                            Markdown("\n".join(lines)),
-                            title="🎯 Objectives",
-                            border_style="cyan",
-                        ))
-                    else:
-                        console.print("Sin objectives. Usá /objectives add <descripción>", style="dim")
-            elif sub == "add" and len(parts) > 2:
-                desc = parts[2]
-                import uuid as _uuid
-                obj_id = f"obj-{_uuid.uuid4().hex[:8]}"
-                if orchestrator.db:
-                    await orchestrator.db.add_objective(obj_id, desc)
-                    console.print(f"✓ Objective creado: {obj_id}", style="bold green")
+            if not orchestrator.db:
+                console.print("DB no disponible.", style="red")
+                continue
+
+            # Obtener sesión y proyecto activo
+            session = getattr(orchestrator, "_session", None)
+            active_id = getattr(session, "active_project_id", None) if session else None
+            if not active_id:
+                console.print("No hay proyecto activo. Usá /project switch <nombre> primero.", style="yellow")
+                continue
+
+            project = await orchestrator.db.fetchone(
+                "SELECT * FROM projects WHERE id = ?", (active_id,)
+            )
+            if not project:
+                console.print("Proyecto activo no encontrado en la DB.", style="red")
+                continue
+
+            if sub == "show":
+                obj = project.get("objective") or ""
+                if obj:
+                    console.print(Panel(
+                        f"**{project['name']}**\n\n{obj}",
+                        title="🎯 Objective",
+                        border_style="cyan",
+                    ))
+                else:
+                    console.print(f"Proyecto '{project['name']}' no tiene objective. Usá /objective set <texto>", style="dim")
+            elif sub == "set" and len(parts) > 2:
+                text = parts[2]
+                await orchestrator.db.update_project_objective(project["id"], text)
+                console.print(f"✓ Objective actualizado para '{project['name']}'", style="bold green")
+            elif sub == "clear":
+                await orchestrator.db.update_project_objective(project["id"], "")
+                console.print(f"✓ Objective eliminado de '{project['name']}'", style="bold green")
             else:
-                console.print("Uso: /objectives list | /objectives add <descripción>", style="yellow")
+                console.print("Uso: /objective | /objective set <texto> | /objective clear", style="yellow")
             continue
 
         # /schedule list | upcoming | cancel | pause | resume

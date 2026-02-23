@@ -79,13 +79,19 @@ interface ImprovementStatus {
     consecutiveNoImprovement: number;
     lastRunAt?: string | null;
     lastScoreDelta?: number | null;
-    tokensLastHour: number;
+    lastCycleTokens?: number | null;
+    tokensLastHour?: number;
     tokenBudget: number;
+    nextRunAt?: string | null;
+    intervalMinutes?: number;
   };
   autonomousLoop: {
     isRunning: boolean;
     currentObjective?: string | null;
-    activeObjectives: number;
+    projectsWithObjective: number;
+    activeScheduledItems: number;
+    lastTickAt?: string | null;
+    tickMinutes?: number;
   };
   behavioralSuite: {
     lastScore: number;
@@ -368,15 +374,11 @@ function App() {
   const [selectedTemplateDetail, setSelectedTemplateDetail] = useState<TaskTemplateDetailItem | null>(null);
   const [templateEditForm, setTemplateEditForm] = useState<TemplateEditFormState | null>(null);
   const [pendingConfirmAction, setPendingConfirmAction] = useState<PendingConfirmAction | null>(null);
+  const [activeProject, setActiveProject] = useState<{ id: string | null; name: string | null; slug: string | null; objective?: string }>({ id: null, name: null, slug: null });
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [pulseTrigger, setPulseTrigger] = useState(0);
   const lastPulse = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
-
-  const activeProjectName = useMemo(() => {
-    const activeProject = projects.find((project) => (project as { isActive?: boolean }).isActive);
-    return activeProject?.name || 'None';
-  }, [projects]);
 
   const triggerPulse = useCallback(() => {
     const now = Date.now();
@@ -391,7 +393,7 @@ function App() {
 
     const run = (async () => {
       try {
-        const [m, business, objective, orchestrator, objectiveList, improvementStatusData, runTasks, upcoming, proj] = await Promise.all([
+        const [m, business, objective, orchestrator, objectiveList, improvementStatusData, runTasks, upcoming, proj, activeProj] = await Promise.all([
           fetch(`${dsUrl}/api/metrics`).then((r) => r.json()),
           fetch(`${dsUrl}/api/metrics/business?hours=24&focus_limit=10`).then((r) => r.json()),
           fetch(`${dsUrl}/api/objectives/overview?hours=24&limit=10`).then((r) => r.json()),
@@ -401,6 +403,7 @@ function App() {
           fetch(`${dsUrl}/api/tasks/recent?hours=24&limit=100`).then((r) => r.json()),
           fetch(`${dsUrl}/api/tasks/upcoming?awaiting_limit=120&scheduled_limit=120`).then((r) => r.json()),
           fetch(`${dsUrl}/api/projects`).then((r) => r.json()),
+          fetch(`${dsUrl}/api/active-project`).then((r) => r.json()).catch(() => ({ id: null, name: null, slug: null })),
         ]);
         setMetrics(m && typeof m === 'object' && !m.detail ? m : null);
         setBusinessMetrics(business && typeof business === 'object' && !business.detail ? business : null);
@@ -421,6 +424,9 @@ function App() {
           scheduled: Array.isArray(upcoming?.scheduled) ? upcoming.scheduled : [],
         });
         setProjects(Array.isArray(proj) ? proj : []);
+        if (activeProj && typeof activeProj === 'object') {
+          setActiveProject(activeProj);
+        }
       } catch (error) {
         console.error('Dashboard refresh failed', error);
       } finally {
@@ -1110,17 +1116,17 @@ function App() {
         <div className="dashboard-mode-actions">
           <button
             type="button"
-            className={`dashboard-mode-btn${dashboardMode === 'business' ? ' active' : ''}`}
-            onClick={() => setDashboardMode('business')}
-          >
-            Business Overview
-          </button>
-          <button
-            type="button"
             className={`dashboard-mode-btn${dashboardMode === 'live' ? ' active' : ''}`}
             onClick={() => setDashboardMode('live')}
           >
             Live Ops
+          </button>
+          <button
+            type="button"
+            className={`dashboard-mode-btn${dashboardMode === 'business' ? ' active' : ''}`}
+            onClick={() => setDashboardMode('business')}
+          >
+            Business Overview
           </button>
         </div>
       </div>
@@ -1178,102 +1184,34 @@ function App() {
               Loop Status
             </div>
 
-            {/* Improvement Loop */}
+            {/* Autonomous Loop — first, runs frequently */}
             <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem"}}>
-                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🔄 Improvement Loop</span>
-                <span style={{
-                  fontSize: "0.65rem", fontWeight: 600, padding: "2px 8px", borderRadius: "9999px",
-                  background: improvementStatus?.improvementLoop.isRunning ? "rgba(34,197,94,0.15)" : "rgba(148,163,184,0.1)",
-                  color: improvementStatus?.improvementLoop.isRunning ? "#22c55e" : "#64748b",
-                  border: `1px solid ${improvementStatus?.improvementLoop.isRunning ? "rgba(34,197,94,0.3)" : "rgba(148,163,184,0.2)"}`,
-                }}>
-                  {improvementStatus?.improvementLoop.isRunning ? "● Running" : "○ Idle"}
-                </span>
-              </div>
-              {/* Stats row */}
-              <div style={{display: "flex", gap: "0.75rem", marginBottom: "0.4rem", flexWrap: "wrap"}}>
-                <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
-                  Cycles: <span style={{color: "var(--text-primary, #e2e8f0)", fontWeight: 600}}>{improvementStatus?.improvementLoop.cycleCount ?? 0}</span>
-                </div>
-                {improvementStatus?.improvementLoop.lastScoreDelta != null && (
-                  <div style={{fontSize: "0.7rem", color: improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "#22c55e" : "#ef4444"}}>
-                    Last Δ: {improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "+" : ""}{improvementStatus.improvementLoop.lastScoreDelta.toFixed(4)}
-                  </div>
-                )}
-                {(improvementStatus?.improvementLoop.consecutiveNoImprovement ?? 0) > 0 && (
-                  <div style={{fontSize: "0.7rem", color: "#f59e0b"}}>
-                    Stale: {improvementStatus!.improvementLoop.consecutiveNoImprovement}x
-                  </div>
-                )}
-              </div>
-              {/* Last run */}
-              {improvementStatus?.improvementLoop.lastRunAt && (
-                <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginBottom: "0.4rem"}}>
-                  Last run: {(() => {
-                    try {
-                      const d = new Date(improvementStatus.improvementLoop.lastRunAt);
-                      const now = Date.now();
-                      const diffMin = Math.round((now - d.getTime()) / 60000);
-                      if (diffMin < 1) return "just now";
-                      if (diffMin < 60) return `${diffMin}m ago`;
-                      const diffH = Math.round(diffMin / 60);
-                      return `${diffH}h ago`;
-                    } catch { return improvementStatus.improvementLoop.lastRunAt; }
-                  })()}
-                </div>
-              )}
-              {/* Token budget bar */}
-              <div>
-                <div style={{display: "flex", justifyContent: "space-between", fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginBottom: "3px"}}>
-                  <span>Token budget/hr</span>
-                  <span>{improvementStatus ? `${(improvementStatus.improvementLoop.tokensLastHour / 1000).toFixed(1)}k / ${(improvementStatus.improvementLoop.tokenBudget / 1000).toFixed(0)}k` : "—"}</span>
-                </div>
-                <div style={{background: "rgba(255,255,255,0.06)", borderRadius: "4px", height: "5px", overflow: "hidden"}}>
-                  <div style={{
-                    background: improvementStatus && improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget > 0.8
-                      ? "linear-gradient(90deg, #ef4444, #f87171)"
-                      : "linear-gradient(90deg, #6366f1, #818cf8)",
-                    width: `${Math.min(100, improvementStatus ? (improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget) * 100 : 0)}%`,
-                    height: "100%", borderRadius: "4px", transition: "width 0.5s ease"
-                  }} />
-                </div>
-              </div>
-            </div>
-
-            {/* Autonomous Loop */}
-            <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem"}}>
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
                 <span style={{fontSize: "0.8rem", fontWeight: 600}}>🎯 Autonomous Loop</span>
-                <span style={{
-                  fontSize: "0.65rem", fontWeight: 600, padding: "2px 8px", borderRadius: "9999px",
-                  background: improvementStatus?.autonomousLoop.isRunning ? "rgba(34,197,94,0.15)" : "rgba(148,163,184,0.1)",
-                  color: improvementStatus?.autonomousLoop.isRunning ? "#22c55e" : "#64748b",
-                  border: `1px solid ${improvementStatus?.autonomousLoop.isRunning ? "rgba(34,197,94,0.3)" : "rgba(148,163,184,0.2)"}`,
-                }}>
-                  {improvementStatus?.autonomousLoop.isRunning ? "● Active" : "○ Idle"}
+                <span className={`status-chip ${improvementStatus?.autonomousLoop.isRunning ? "status-running" : "status-idle"}`}>
+                  {improvementStatus?.autonomousLoop.isRunning ? "Active" : "Idle"}
                 </span>
               </div>
-              <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
-                <span style={{color: "var(--text-primary, #e2e8f0)", fontWeight: 600}}>{improvementStatus?.autonomousLoop.activeObjectives ?? 0}</span> active objective{(improvementStatus?.autonomousLoop.activeObjectives ?? 0) !== 1 ? "s" : ""}
-              </div>
-              {improvementStatus?.autonomousLoop.currentObjective && (
-                <div style={{fontSize: "0.65rem", color: "#818cf8", marginTop: "0.3rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
-                  Working on: {improvementStatus.autonomousLoop.currentObjective}
-                </div>
-              )}
-            </div>
-
-            {/* Behavioral Suite */}
-            <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.4rem"}}>🧪 Behavioral Suite</div>
-              <div style={{display: "flex", alignItems: "center", gap: "0.5rem"}}>
-                <span style={{fontSize: "1.1rem", fontWeight: 700, color: improvementStatus && improvementStatus.behavioralSuite.lastScore >= 0.8 ? "#22c55e" : improvementStatus && improvementStatus.behavioralSuite.lastScore >= 0.5 ? "#f59e0b" : "#ef4444"}}>
-                  {improvementStatus ? (improvementStatus.behavioralSuite.lastScore * 100).toFixed(1) + "%" : "—"}
-                </span>
-                <span style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
-                  {improvementStatus ? `${improvementStatus.behavioralSuite.casesPassed}/${improvementStatus.behavioralSuite.casesTotal} cases` : ""}
-                </span>
+              {(() => {
+                const lastTick = improvementStatus?.autonomousLoop.lastTickAt;
+                if (lastTick) {
+                  const elapsedMs = clockNow - new Date(lastTick).getTime();
+                  const mins = Math.floor(elapsedMs / 60_000);
+                  const label = mins < 1 ? "just now" : `${mins}m ago`;
+                  return (
+                    <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
+                      Last cycle: {label}
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
+                    Last cycle: waiting for first tick
+                  </div>
+                );
+              })()}
+              <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.2rem"}}>
+                {improvementStatus?.autonomousLoop.projectsWithObjective ?? 0} projects with objective · {improvementStatus?.autonomousLoop.activeScheduledItems ?? 0} scheduled items
               </div>
             </div>
 
@@ -1291,6 +1229,89 @@ function App() {
                 ))}
               </div>
             )}
+
+            {/* Improvement Loop — last, runs every 6h */}
+            <div className="glass-card" style={{padding: "0.75rem"}}>
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem"}}>
+                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🔄 Improvement Loop</span>
+                <span className={`status-chip ${improvementStatus?.improvementLoop.isRunning ? "status-running" : "status-idle"}`}>
+                  {improvementStatus?.improvementLoop.isRunning ? "Running" : "Idle"}
+                </span>
+              </div>
+              {/* Next cycle countdown */}
+              {(() => {
+                const nextRun = improvementStatus?.improvementLoop.nextRunAt;
+                const intervalMin = improvementStatus?.improvementLoop.intervalMinutes ?? 360;
+                if (nextRun) {
+                  const nextMs = new Date(nextRun).getTime();
+                  const remainMs = nextMs - clockNow;
+                  if (remainMs > 0) {
+                    const h = Math.floor(remainMs / 3_600_000);
+                    const m = Math.floor((remainMs % 3_600_000) / 60_000);
+                    return (
+                      <div style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
+                        Next cycle: <span style={{color: "var(--text-primary)", fontWeight: 600}}>{h}h {m}m</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{fontSize: "0.75rem", color: "#f59e0b"}}>
+                      Next cycle: waiting for idle window
+                    </div>
+                  );
+                }
+                return (
+                  <div style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
+                    Next cycle: first run in ~{Math.round(intervalMin / 60)}h
+                  </div>
+                );
+              })()}
+              {improvementStatus?.improvementLoop.lastScoreDelta != null && (
+                <div style={{fontSize: "0.75rem", color: improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "#22c55e" : "#ef4444", marginTop: "0.25rem"}}>
+                  Last Δ: {improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "+" : ""}{improvementStatus.improvementLoop.lastScoreDelta.toFixed(4)}
+                </div>
+              )}
+              {improvementStatus?.improvementLoop.consecutiveNoImprovement > 0 && (
+                <div style={{fontSize: "0.75rem", color: "#f59e0b", marginTop: "0.25rem"}}>
+                  Stale: {improvementStatus.improvementLoop.consecutiveNoImprovement} cycles without improvement
+                </div>
+              )}
+              {(() => {
+                const tokens = improvementStatus?.improvementLoop.lastCycleTokens ?? 0;
+                const budget = improvementStatus?.improvementLoop.tokenBudget ?? 80000;
+                const pct = budget > 0 ? Math.min(100, (tokens / budget) * 100) : 0;
+                return (
+                  <div style={{marginTop: "0.3rem"}}>
+                    <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
+                      Last cycle tokens: {tokens > 0 ? `${(tokens / 1000).toFixed(1)}k / ${(budget / 1000).toFixed(0)}k budget` : `No data yet (budget: ${(budget / 1000).toFixed(0)}k)`}
+                    </div>
+                    {tokens > 0 && (
+                      <div style={{background: "rgba(255,255,255,0.08)", borderRadius: "4px", height: "6px", overflow: "hidden", marginTop: "0.25rem"}}>
+                        <div style={{
+                          background: pct > 80 ? "#ef4444" : "#6366f1",
+                          width: `${pct}%`,
+                          height: "100%", borderRadius: "4px", transition: "width 0.5s ease"
+                        }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {(() => {
+                const score = improvementStatus?.behavioralSuite?.lastScore;
+                const passed = improvementStatus?.behavioralSuite?.casesPassed ?? 0;
+                const total = improvementStatus?.behavioralSuite?.casesTotal ?? 0;
+                const hasData = total > 0;
+                const color = hasData ? (score! >= 0.8 ? "#22c55e" : score! >= 0.5 ? "#f59e0b" : "#ef4444") : "var(--text-secondary, #94a3b8)";
+                return (
+                  <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
+                    Behavioral score: {hasData
+                      ? <span style={{color, fontWeight: 600}}>{(score! * 100).toFixed(1)}% ({passed}/{total} cases)</span>
+                      : "No data yet"}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
 
@@ -1875,14 +1896,11 @@ function App() {
         ) : null}
       </AnimatePresence>
 
-      <div style={{ marginTop: '0.75rem', marginBottom: '0.25rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-        Active project: <strong>{activeProjectName}</strong>
-      </div>
-
       <ChatInput
         onSendMessage={handleSendMessage}
         agents={[]}
         projects={projects}
+        activeProjectName={activeProject.name}
         requestCompletions={requestCompletions}
         apiBaseUrl={dsUrl}
       />
