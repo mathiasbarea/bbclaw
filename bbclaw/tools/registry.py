@@ -35,6 +35,7 @@ _TOOL_VERBS: dict[str, str] = {
 }
 
 _READ_TOOLS_WITH_PATH = {"read_file", "read_source"}
+_TOOLS_WITH_DIRECTORY = {"list_files"}
 
 _VERIFY_TOOLS = {"write_file", "edit_file", "write_source"}
 _EXT_VERIFY_CMD: dict[str, list[str]] = {
@@ -93,14 +94,15 @@ async def _auto_commit(tool_name: str, kwargs: dict) -> None:
 
 def _normalize_tool_path(path_arg: Any) -> str:
     raw = "" if path_arg is None else str(path_arg)
-    stripped = raw.strip()
+    stripped = raw.strip().replace("\\", "/")
     if stripped in {"", ".", "./", ".\\"}:
         return "."
     return str(Path(stripped))
 
 
 def _build_actionable_path_error(tool_name: str, kwargs: dict, error: Exception) -> str:
-    original = kwargs.get("path")
+    key = "path" if "path" in kwargs else "directory" if "directory" in kwargs else "path"
+    original = kwargs.get(key)
     normalized = _normalize_tool_path(original)
     msg = str(error)
 
@@ -110,9 +112,15 @@ def _build_actionable_path_error(tool_name: str, kwargs: dict, error: Exception)
     if any(seg in normalized for seg in ("..", "~")):
         hints.append("evitá usar '..' o '~'; pasá una ruta relativa al workspace")
 
-    if "Archivo no encontrado" in msg or "No such file" in msg or "not found" in msg.lower():
+    lower_msg = msg.lower()
+    if (
+        "archivo no encontrado" in lower_msg
+        or "directorio no encontrado" in lower_msg
+        or "no such file" in lower_msg
+        or "not found" in lower_msg
+    ):
         base = f"{msg}. Path recibido='{original}', normalizado='{normalized}'."
-        suggestion = "Sugerencia: usá list_files/check_path antes de read_file/read_source para confirmar la ruta exacta."
+        suggestion = "Sugerencia: usá list_files/check_path antes de leer para confirmar la ruta exacta."
         if hints:
             return f"{base} Posible causa: {'; '.join(hints)}. {suggestion}"
         return f"{base} {suggestion}"
@@ -177,6 +185,8 @@ class ToolRegistry:
 
         if tool_name in _READ_TOOLS_WITH_PATH and "path" in kwargs:
             kwargs = {**kwargs, "path": _normalize_tool_path(kwargs.get("path"))}
+        if tool_name in _TOOLS_WITH_DIRECTORY and "directory" in kwargs:
+            kwargs = {**kwargs, "directory": _normalize_tool_path(kwargs.get("directory"))}
 
         tool = self._tools[tool_name]
         try:
@@ -184,7 +194,8 @@ class ToolRegistry:
             tr = ToolResult(success=True, output=result)
         except Exception as e:
             logger.error("Error al ejecutar tool '%s': %s", tool_name, e)
-            error_msg = _build_actionable_path_error(tool_name, kwargs, e) if tool_name in _READ_TOOLS_WITH_PATH else str(e)
+            should_wrap = tool_name in _READ_TOOLS_WITH_PATH or tool_name in _TOOLS_WITH_DIRECTORY
+            error_msg = _build_actionable_path_error(tool_name, kwargs, e) if should_wrap else str(e)
             return ToolResult(success=False, output=None, error=error_msg)
 
         # Auto-verify syntax after file mutations
