@@ -42,6 +42,11 @@ HELP_TEXT = """
 - `/objectives list`   — listar objectives activos
 - `/objectives add <desc>` — agregar nuevo objective
 - `/improvements [N]`  — últimos N improvement attempts (default 5)
+- `/schedule list`     — listar tareas/reminders programados
+- `/schedule upcoming` — próximas ejecuciones
+- `/schedule cancel <id>` — cancelar item
+- `/schedule pause <id>`  — pausar item
+- `/schedule resume <id>` — resumir item
 - `/logout`            — elimina el token OAuth guardado
 - `/exit`              — salir del sistema
 
@@ -68,7 +73,34 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
     await orchestrator.start()
     console.print("✓ Sistema listo.\n", style="bold green")
 
+    # Show missed reminders (fired while offline)
+    try:
+        if orchestrator.db:
+            from bbclaw.core.scheduler import to_iso, now_utc
+            missed = await orchestrator.db.get_due_items(to_iso(now_utc()))
+            for item in missed:
+                if item.get("item_type") == "reminder":
+                    console.print(Panel(
+                        f"{item['title']}\n[dim]Programado: {item.get('next_run_at', '?')}[/dim]",
+                        title="🔔 Recordatorio perdido",
+                        border_style="magenta",
+                    ))
+    except Exception:
+        pass
+
     while True:
+        # Display pending reminders before prompt
+        try:
+            reminders = orchestrator.get_and_clear_reminders()
+            for rem in reminders:
+                console.print(Panel(
+                    f"{rem['title']}\n[dim]{rem.get('fired_at', '')}[/dim]",
+                    title="🔔 Recordatorio",
+                    border_style="magenta",
+                ))
+        except Exception:
+            pass
+
         try:
             user_input = await asyncio.to_thread(
                 Prompt.ask, "[bold blue]Tú[/bold blue]"
@@ -154,6 +186,84 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
                     console.print(f"✓ Objective creado: {obj_id}", style="bold green")
             else:
                 console.print("Uso: /objectives list | /objectives add <descripción>", style="yellow")
+            continue
+
+        # /schedule list | upcoming | cancel | pause | resume
+        if user_input.lower().startswith("/schedule"):
+            parts = user_input.split(maxsplit=2)
+            sub = parts[1].lower() if len(parts) > 1 else "list"
+
+            if sub == "list":
+                if orchestrator.db:
+                    from bbclaw.core.scheduler import describe_schedule
+                    items = await orchestrator.db.get_scheduled_items()
+                    if items:
+                        lines = []
+                        for item in items:
+                            sched = item["schedule"] if isinstance(item["schedule"], dict) else {}
+                            icon = "🔔" if item["item_type"] == "reminder" else "📋"
+                            st_icon = {"active": "🟢", "paused": "⏸️", "done": "✅", "cancelled": "❌"}.get(item["status"], "⚪")
+                            lines.append(
+                                f"{icon} {st_icon} **{item['id']}** — {item['title']}\n"
+                                f"   {describe_schedule(sched)} | Próx: {item.get('next_run_at', 'N/A')} | Runs: {item.get('run_count', 0)}"
+                            )
+                        console.print(Panel(
+                            Markdown("\n".join(lines)),
+                            title="📅 Items programados",
+                            border_style="cyan",
+                        ))
+                    else:
+                        console.print("Sin items programados.", style="dim")
+            elif sub == "upcoming":
+                if orchestrator.db:
+                    from bbclaw.core.scheduler import describe_schedule
+                    items = await orchestrator.db.get_scheduled_items(status="active")
+                    if items:
+                        lines = []
+                        for item in items[:10]:
+                            sched = item["schedule"] if isinstance(item["schedule"], dict) else {}
+                            icon = "🔔" if item["item_type"] == "reminder" else "📋"
+                            lines.append(
+                                f"{icon} **{item['id']}** — {item['title']}\n"
+                                f"   Próx: {item.get('next_run_at', 'N/A')} | {describe_schedule(sched)}"
+                            )
+                        console.print(Panel(
+                            Markdown("\n".join(lines)),
+                            title="📅 Próximas ejecuciones",
+                            border_style="cyan",
+                        ))
+                    else:
+                        console.print("Sin items activos.", style="dim")
+            elif sub in ("cancel", "pause", "resume") and len(parts) > 2:
+                item_id = parts[2].strip()
+                if orchestrator.db:
+                    item = await orchestrator.db.get_scheduled_item(item_id)
+                    if not item:
+                        console.print(f"Item no encontrado: {item_id}", style="red")
+                    elif sub == "cancel":
+                        await orchestrator.db.update_scheduled_item(item_id, status="cancelled", next_run_at=None)
+                        console.print(f"✓ Cancelado: {item_id}", style="bold green")
+                    elif sub == "pause":
+                        if item["status"] != "active":
+                            console.print(f"Solo se puede pausar items activos (actual: {item['status']})", style="yellow")
+                        else:
+                            await orchestrator.db.update_scheduled_item(item_id, status="paused")
+                            console.print(f"✓ Pausado: {item_id}", style="bold green")
+                    elif sub == "resume":
+                        if item["status"] != "paused":
+                            console.print(f"Solo se puede resumir items pausados (actual: {item['status']})", style="yellow")
+                        else:
+                            from bbclaw.core.scheduler import compute_next_run
+                            sched = item["schedule"] if isinstance(item["schedule"], dict) else {}
+                            next_run = compute_next_run(sched)
+                            if next_run:
+                                await orchestrator.db.update_scheduled_item(item_id, status="active", next_run_at=next_run)
+                                console.print(f"✓ Resumido: {item_id} — Próx: {next_run}", style="bold green")
+                            else:
+                                await orchestrator.db.update_scheduled_item(item_id, status="done", next_run_at=None)
+                                console.print(f"Item {item_id} no tiene más ejecuciones. Marcado como done.", style="yellow")
+            else:
+                console.print("Uso: /schedule list | upcoming | cancel <id> | pause <id> | resume <id>", style="yellow")
             continue
 
         # /improvements [N]

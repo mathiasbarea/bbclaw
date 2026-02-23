@@ -337,7 +337,44 @@ def create_app(orchestrator) -> Any:
 
     @api.get("/tasks/upcoming")
     async def tasks_upcoming(awaiting_limit: int = 120, scheduled_limit: int = 120):
-        return {"awaitingNow": [], "scheduled": []}
+        db = _db()
+        # Pending tasks awaiting execution
+        awaiting = []
+        try:
+            pending = await db.fetchall(
+                "SELECT id, name, status, created_at FROM tasks "
+                "WHERE status = 'pending' ORDER BY created_at ASC LIMIT ?",
+                (awaiting_limit,),
+            )
+            for t in pending:
+                awaiting.append({
+                    "id": t["id"],
+                    "title": t.get("name", "Sin título"),
+                    "type": "task",
+                    "status": t.get("status", "pending"),
+                    "createdAt": t.get("created_at", ""),
+                })
+        except Exception:
+            pass
+        # Scheduled items
+        scheduled = []
+        try:
+            items = await db.get_scheduled_items(status="active")
+            from bbclaw.core.scheduler import describe_schedule
+            for item in items[:scheduled_limit]:
+                sched = item["schedule"] if isinstance(item["schedule"], dict) else {}
+                scheduled.append({
+                    "id": item["id"],
+                    "title": item["title"],
+                    "type": item.get("item_type", "task"),
+                    "status": item.get("status", "active"),
+                    "nextRunAt": item.get("next_run_at"),
+                    "runCount": item.get("run_count", 0),
+                    "schedule": describe_schedule(sched),
+                })
+        except Exception:
+            pass
+        return {"awaitingNow": awaiting, "scheduled": scheduled}
 
     @api.get("/tasks/{task_id}")
     async def task_detail(task_id: str):

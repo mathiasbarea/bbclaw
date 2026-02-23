@@ -46,6 +46,63 @@ class AutonomousLoop:
             "activeObjectives": 0,  # se actualiza en _loop
         }
 
+    async def _process_scheduled_items(self) -> None:
+        """Process due scheduled items: fire reminders, run tasks."""
+        if not self.orch.db:
+            return
+        try:
+            from .scheduler import to_iso, now_utc, compute_next_run
+            now = now_utc()
+            due_items = await self.orch.db.get_due_items(to_iso(now))
+
+            for item in due_items:
+                item_id = item["id"]
+                sched = item["schedule"] if isinstance(item["schedule"], dict) else {}
+
+                if item["item_type"] == "reminder":
+                    # Append to orchestrator pending reminders (no agent)
+                    self.orch._pending_reminders.append({
+                        "id": item_id,
+                        "title": item["title"],
+                        "fired_at": to_iso(now),
+                    })
+                    logger.info("Reminder fired: %s — %s", item_id, item["title"])
+                else:
+                    # Scheduled task — run via orchestrator
+                    try:
+                        await asyncio.wait_for(
+                            self.orch.run(
+                                item.get("description") or item["title"],
+                                intent="autonomous",
+                            ),
+                            timeout=300,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning("Scheduled task timeout: %s", item_id)
+                    except Exception as e:
+                        logger.error("Scheduled task error %s: %s", item_id, e)
+
+                # Update item: run_count++, last_run_at, compute next
+                new_count = (item.get("run_count") or 0) + 1
+                next_run = compute_next_run(sched, after=now)
+                if next_run is None:
+                    await self.orch.db.update_scheduled_item(
+                        item_id,
+                        status="done",
+                        last_run_at=to_iso(now),
+                        run_count=new_count,
+                        next_run_at=None,
+                    )
+                else:
+                    await self.orch.db.update_scheduled_item(
+                        item_id,
+                        last_run_at=to_iso(now),
+                        run_count=new_count,
+                        next_run_at=next_run,
+                    )
+        except Exception as e:
+            logger.error("Error processing scheduled items: %s", e)
+
     async def _loop(self) -> None:
         # Esperar 60s al inicio para que el sistema se estabilice
         await asyncio.sleep(60)
@@ -54,7 +111,12 @@ class AutonomousLoop:
 
         while True:
             try:
-                await asyncio.sleep(tick * 60)
+                # Use clock-aligned ticks instead of flat sleep
+                from .scheduler import next_aligned_tick, now_utc
+                target = next_aligned_tick(tick, now_utc())
+                delay = (target - now_utc()).total_seconds()
+                if delay > 0:
+                    await asyncio.sleep(delay)
 
                 # No correr si improvement está activo
                 if self.orch._improvement_running:
@@ -62,6 +124,9 @@ class AutonomousLoop:
 
                 if not self.orch.db:
                     continue
+
+                # Process scheduled items FIRST
+                await self._process_scheduled_items()
 
                 # Obtener objectives activos
                 objectives = await self.orch.db.get_objectives(status="active")
