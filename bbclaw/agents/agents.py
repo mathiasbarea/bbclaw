@@ -25,17 +25,30 @@ class CoderAgent(Agent):
 
 Tarea: {context.task_description}
 
-Directrices:
-- Escribe código limpio, bien comentado y que funcione desde el primer intento
-- Siempre verifica el resultado de los comandos (tests, lint, etc.)
-- Si instalás dependencias, usá el entorno virtual si existe
-- Preferí editar archivos existentes en lugar de recrearlos desde cero
-- Cuando escribas código Python, seguí las convenciones PEP 8
+## Reglas de oro para editar código
 
-Herramientas disponibles: filesystem completo + terminal"""
+1. SIEMPRE lee el archivo antes de editarlo con `read_file(path)`.
+2. Usa `edit_file(path, old_string, new_string)` para cambios parciales. Solo usa `write_file` para archivos NUEVOS.
+3. Usa `search_files(pattern)` para encontrar dónde está el código antes de editarlo.
+4. Verifica después de editar: `run_command("python -m py_compile <archivo>")` para Python.
+5. Cambios mínimos y focalizados — no reescribas código que no necesita cambiar.
+6. Si `edit_file` falla (old_string no encontrado): re-lee el archivo con `read_file` y reintenta con el texto exacto.
+
+## Herramientas clave
+- `read_file(path)` — leer contenido de un archivo
+- `edit_file(path, old_string, new_string)` — edición quirúrgica (reemplazo exacto)
+- `write_file(path, content)` — escribir archivo completo (solo para nuevos)
+- `search_files(pattern, directory, max_results)` — grep recursivo en el workspace
+- `list_files(directory)` — listar archivos del workspace
+- `run_command(command)` — ejecutar comando en terminal
+
+## Directrices generales
+- Escribe código limpio que funcione desde el primer intento
+- Seguí convenciones PEP 8 para Python
+- Si instalás dependencias, usá el entorno virtual si existe"""
 
         if context.memory_context:
-            base += f"\n\n{context.memory_context}"
+            base += f"\n\n--- Contexto relevante ---\n{context.memory_context}"
 
         return base
 
@@ -54,16 +67,21 @@ class ResearcherAgent(Agent):
 
 Tarea: {context.task_description}
 
-Directrices:
-- Lée los archivos relevantes antes de responder
-- Sé preciso y cita fuentes cuando sea posible
-- Si algo no está claro, investigá más antes de concluir
-- Sintetizá la información de forma clara y directa
+## Herramientas primarias
+- `search_files(pattern, directory, max_results)` — buscar código/texto en el workspace con regex
+- `read_file(path)` — leer archivos completos
+- `list_files(directory)` — explorar estructura del workspace
+- `run_command(command)` — ejecutar comandos (grep, find, etc.)
 
-Herramientas disponibles: filesystem (solo lectura recomendada) + terminal (para buscar con grep, etc.)"""
+## Directrices
+- Usá `search_files` para encontrar archivos relevantes antes de leerlos
+- Lée los archivos relevantes antes de responder
+- Sé preciso y citá fuentes (archivo:línea) cuando sea posible
+- Si algo no está claro, investigá más antes de concluir
+- Sintetizá la información de forma clara y directa"""
 
         if context.memory_context:
-            base += f"\n\n{context.memory_context}"
+            base += f"\n\n--- Contexto relevante ---\n{context.memory_context}"
 
         return base
 

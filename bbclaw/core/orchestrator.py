@@ -242,6 +242,59 @@ class Orchestrator:
         cleaned = (text[:start] + text[match.end():]).strip()
         return cleaned or text  # si queda vacío, devolver original
 
+    _MULTI_STEP_KEYWORDS = (
+        "y luego", "después", "primero", "paso 1", "paso 2",
+        "1.", "2.", "además", "investiga y", "analiza y",
+        "and then", "first", "step 1", "step 2", "also",
+    )
+
+    def _is_simple_task(self, user_input: str) -> bool:
+        """Heurística: True si la tarea es lo suficientemente simple para modo directo."""
+        if len(user_input) > 500:
+            return False
+        lower = user_input.lower()
+        return not any(kw in lower for kw in self._MULTI_STEP_KEYWORDS)
+
+    async def run_direct(self, user_input: str, memory_ctx: str = "", intent: str = "user") -> str:
+        """
+        Modo directo: bypasea planner y task_queue para tareas simples.
+        Un solo agente resuelve directamente.
+        """
+        assert self.db
+
+        agent = self.agents.get("coder") or self.agents.get("generalist")
+        if not agent:
+            raise RuntimeError("No hay agente disponible para modo directo")
+
+        logger.info("Modo directo para: %s", user_input[:80])
+
+        ctx = AgentContext(
+            task_description=user_input,
+            memory_context=memory_ctx,
+        )
+        result = await agent.run(ctx)
+        response = result.output if result.success else f"Error: {result.error}"
+
+        # Guardar en memoria (misma lógica que run() pasos 5-6)
+        conv_id = await self.db.save_conversation(
+            user_msg=user_input,
+            agent_msg=response,
+            metadata={"mode": "direct", "agent": agent.name, "success": result.success},
+        )
+
+        if self.vectors and self.provider:
+            try:
+                embedding = await self.provider.embed(f"{user_input}\n{response}")
+                await self.vectors.store(
+                    text=f"Usuario: {user_input}\nAsistente: {response[:500]}",
+                    embedding=embedding,
+                    metadata={"conv_id": conv_id},
+                )
+            except Exception as e:
+                logger.debug("No se pudo guardar embedding: %s", e)
+
+        return response
+
     async def run(self, user_input: str, intent: str = "user") -> str:
         """
         Pipeline completo:
@@ -269,6 +322,10 @@ class Orchestrator:
 
         # 1. Contexto de memoria
         memory_ctx = await self.context_builder.build(user_input)
+
+        # Modo directo para tareas simples (bypasea planner + task_queue)
+        if intent == "user" and self._is_simple_task(user_input):
+            return await self.run_direct(user_input, memory_ctx=memory_ctx, intent=intent)
 
         # 2. Crear plan
         plan = await self.planner.create_plan(user_input, context=memory_ctx)

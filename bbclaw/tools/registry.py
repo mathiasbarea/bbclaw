@@ -187,6 +187,12 @@ class ToolRegistry:
             error_msg = _build_actionable_path_error(tool_name, kwargs, e) if tool_name in _READ_TOOLS_WITH_PATH else str(e)
             return ToolResult(success=False, output=None, error=error_msg)
 
+        # Auto-verify syntax after file mutations
+        if tr.success and tool_name in _VERIFY_TOOLS:
+            warning = await _auto_verify(tool_name, kwargs)
+            if warning:
+                tr = ToolResult(success=True, output=str(tr.output) + warning)
+
         if tr.success and _auto_commit_enabled and tool_name in _MUTATING_TOOLS:
             await _auto_commit(tool_name, kwargs)
 
