@@ -24,6 +24,8 @@ class AutonomousLoop:
         self._task: asyncio.Task | None = None
         self._running = False
         self._current_objective: str | None = None
+        self._last_tick_at: str | None = None
+        self._tick_minutes: int = 5
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop())
@@ -43,7 +45,9 @@ class AutonomousLoop:
         return {
             "isRunning": self._running,
             "currentObjective": self._current_objective,
-            "activeObjectives": 0,  # se actualiza en _loop
+            "activeObjectives": 0,  # overridden by API with real DB count
+            "lastTickAt": self._last_tick_at,
+            "tickMinutes": self._tick_minutes,
         }
 
     async def _process_scheduled_items(self) -> None:
@@ -108,15 +112,18 @@ class AutonomousLoop:
         await asyncio.sleep(60)
 
         tick = self.orch.config.get("autonomous", {}).get("tick_minutes", 5)
+        self._tick_minutes = tick
 
         while True:
             try:
                 # Use clock-aligned ticks instead of flat sleep
-                from .scheduler import next_aligned_tick, now_utc
+                from .scheduler import next_aligned_tick, now_utc, to_iso
                 target = next_aligned_tick(tick, now_utc())
                 delay = (target - now_utc()).total_seconds()
                 if delay > 0:
                     await asyncio.sleep(delay)
+
+                self._last_tick_at = to_iso(now_utc())
 
                 # No correr si improvement está activo
                 if self.orch._improvement_running:

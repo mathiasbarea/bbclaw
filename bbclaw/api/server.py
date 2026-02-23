@@ -278,12 +278,15 @@ def create_app(orchestrator) -> Any:
         imp = getattr(orchestrator, "_improvement_loop", None)
         auto = getattr(orchestrator, "_autonomous_loop", None)
 
-        # Obtener conteo real de objectives activos
+        # Obtener conteos reales de objectives y scheduled items
         active_objectives = 0
+        active_scheduled = 0
         try:
             db = _db()
             objs = await db.get_objectives(status="active")
             active_objectives = len(objs)
+            sched = await db.get_scheduled_items(status="active")
+            active_scheduled = len(sched)
         except Exception:
             pass
 
@@ -303,8 +306,11 @@ def create_app(orchestrator) -> Any:
                 **(auto.status if auto else {
                     "isRunning": False,
                     "currentObjective": None,
+                    "lastTickAt": None,
+                    "tickMinutes": 5,
                 }),
                 "activeObjectives": active_objectives,
+                "activeScheduledItems": active_scheduled,
             },
             "behavioralSuite": {
                 "lastScore": 0,
