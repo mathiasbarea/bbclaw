@@ -5,6 +5,7 @@ Cada agente especializado hereda de esta clase y define su system prompt.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import uuid
@@ -64,14 +65,17 @@ class Agent:
 
     def system_prompt(self, context: AgentContext) -> str:
         """Override en subclases para customizar el prompt del sistema."""
+        tools_desc = self.tool_registry.describe_for_prompt()
         base = f"""Eres {self.name}, {self.description}
 
 Hoy tienes la siguiente tarea: {context.task_description}
 
+Herramientas disponibles:
+{tools_desc}
+
 Reglas:
-- Usa las herramientas disponibles para completar la tarea
+- Usa la herramienta más específica disponible para cada acción
 - Sé preciso y conciso en tus respuestas finales
-- Si necesitas crear o modificar archivos, usa siempre las herramientas de filesystem
 - Siempre verifica el resultado de los comandos antes de continuar"""
 
         if context.memory_context:
@@ -94,11 +98,7 @@ Reglas:
             # Build API-ready messages for the provider
             api_messages = self._build_api_messages(messages)
 
-            response = await self.provider.complete(
-                messages=api_messages,  # type: ignore[arg-type]
-                tools=tools if tools else None,
-                temperature=self.temperature,
-            )
+            response = await self._complete_with_retry(api_messages, tools)
 
             # Si el LLM quiere hacer tool calls → ejecutar y continuar
             if response.tool_calls:
@@ -152,6 +152,59 @@ Reglas:
             tool_calls_made=tool_calls_count,
             error=f"Máximo de iteraciones ({self.max_iterations}) alcanzado sin respuesta final",
         )
+
+    async def _complete_with_retry(
+        self,
+        api_messages: list[dict],
+        tools: list[dict] | None,
+        max_retries: int = 2,
+    ):
+        """
+        Llama al provider con reintentos automáticos.
+        - Errores transitorios (5xx, timeout, red): reintenta hasta max_retries veces.
+        - Errores de cliente (4xx): falla inmediatamente con mensaje descriptivo.
+        """
+        import httpx
+
+        last_error: Exception | None = None
+        for attempt in range(max_retries + 1):
+            try:
+                return await self.provider.complete(
+                    messages=api_messages,  # type: ignore[arg-type]
+                    tools=tools if tools else None,
+                    temperature=self.temperature,
+                )
+            except httpx.HTTPStatusError as e:
+                status = e.response.status_code if e.response is not None else 0
+                body = ""
+                try:
+                    body = e.response.text if e.response is not None else ""
+                except Exception:
+                    pass
+
+                if 400 <= status < 500:
+                    # Error de cliente — no tiene sentido reintentar
+                    raise RuntimeError(
+                        f"Error del proveedor ({status}): {body[:300]}"
+                    ) from e
+
+                # Error de servidor — reintentar
+                last_error = RuntimeError(f"Error del proveedor ({status}): {body[:200]}")
+                logger.warning(
+                    "[%s] Error transitorio (intento %d/%d): %s",
+                    self.name, attempt + 1, max_retries + 1, last_error,
+                )
+            except (asyncio.TimeoutError, OSError, ConnectionError) as e:
+                last_error = e
+                logger.warning(
+                    "[%s] Error de red (intento %d/%d): %s",
+                    self.name, attempt + 1, max_retries + 1, e,
+                )
+
+            if attempt < max_retries:
+                await asyncio.sleep(2 ** attempt)  # backoff: 1s, 2s
+
+        raise last_error or RuntimeError("Error desconocido al llamar al proveedor")
 
     def _build_api_messages(self, messages: list[Message]) -> list[dict]:
         """Convierte mensajes internos al formato de la API de OpenAI."""

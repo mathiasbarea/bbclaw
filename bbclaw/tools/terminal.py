@@ -11,7 +11,7 @@ import shlex
 from pathlib import Path
 
 from .registry import registry
-from .filesystem import _WORKSPACE_ROOT
+from .filesystem import get_workspace_root
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +24,26 @@ async def _run_command(
     working_dir: str = ".",
 ) -> str:
     """
-    Ejecuta un comando de shell en el workspace del agente.
+    Ejecuta un comando de shell.
+    - working_dir puede ser ABSOLUTO o relativo al workspace.
+    - Si es relativo, se resuelve desde el workspace root actual.
     - stdout y stderr se capturan y devuelven combinados.
     - Si el proceso supera el timeout, se termina.
-    - El working_dir es relativo al workspace root.
     """
     # Resolver directorio de trabajo
-    cwd = (_WORKSPACE_ROOT / working_dir).resolve()
-    if not str(cwd).startswith(str(_WORKSPACE_ROOT.resolve())):
-        raise ValueError(f"working_dir '{working_dir}' está fuera del workspace")
+    wd_path = Path(working_dir)
+    if wd_path.is_absolute():
+        # Path absoluto: usar directamente, sin restricción de workspace
+        cwd = wd_path.resolve()
+    else:
+        # Path relativo: resolver desde workspace root actual
+        workspace = get_workspace_root()
+        cwd = (workspace / working_dir).resolve()
+        # Validar que no escape del workspace
+        try:
+            cwd.relative_to(workspace.resolve())
+        except ValueError:
+            raise ValueError(f"working_dir relativo '{working_dir}' está fuera del workspace")
     cwd.mkdir(parents=True, exist_ok=True)
 
     logger.info("Ejecutando: %s (cwd=%s, timeout=%ds)", command, cwd, timeout)
@@ -86,7 +97,12 @@ registry.register(
             },
             "working_dir": {
                 "type": "string",
-                "description": "Directorio de trabajo relativo al workspace (default: raíz del workspace)",
+                "description": (
+                    "Directorio de trabajo. Puede ser ABSOLUTO "
+                    "(ej: C:\\\\Users\\\\mathi\\\\Documents\\\\mi-proyecto) "
+                    "para ejecutar fuera del workspace, "
+                    "o relativo a la raíz del workspace (default: '.')."
+                ),
                 "default": ".",
             },
         },

@@ -50,13 +50,10 @@ class VectorMemory:
             return
         self._conn = await aiosqlite.connect(self.db_path)
 
-        # Cargar extensión sqlite-vec en modo sync (sqlite-vec necesita load_extension)
-        def _setup(conn):
-            conn.enable_load_extension(True)
-            sqlite_vec.load(conn)
-            conn.enable_load_extension(False)
-
-        await self._conn.run_sync(_setup)
+        # Cargar extensión sqlite-vec (aiosqlite 0.17+ expone estos métodos como async)
+        await self._conn.enable_load_extension(True)
+        await self._conn.load_extension(sqlite_vec.loadable_path())
+        await self._conn.enable_load_extension(False)
 
         # Crear tablas
         await self._conn.executescript(VECTORS_SCHEMA)
@@ -117,9 +114,8 @@ class VectorMemory:
                 v.distance
             FROM vec_index v
             JOIN vec_documents d ON d.id = v.rowid
-            WHERE v.embedding MATCH ?
+            WHERE v.embedding MATCH ? AND k = ?
             ORDER BY v.distance
-            LIMIT ?
             """,
             (_serialize(query_embedding), k),
         )

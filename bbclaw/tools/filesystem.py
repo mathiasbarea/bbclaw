@@ -25,6 +25,11 @@ def set_workspace(path: str | Path) -> None:
     _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def get_workspace_root() -> Path:
+    """Retorna el workspace root actual. Siempre refleja el valor más reciente."""
+    return _WORKSPACE_ROOT
+
+
 def _safe_path(relative_path: str) -> Path:
     """
     Convierte un path relativo a absoluto dentro del workspace.
@@ -172,6 +177,67 @@ registry.register(
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": "Ruta relativa al workspace"},
+        },
+        "required": ["path"],
+    },
+)
+
+
+async def _check_path(path: str) -> str:
+    """
+    Verifica si un path existe en el sistema de archivos.
+    Acepta paths absolutos (para verificar fuera del workspace)
+    o relativos (resueltos desde el workspace actual).
+    """
+    p = Path(path)
+    if not p.is_absolute():
+        p = (_WORKSPACE_ROOT / path).resolve()
+
+    if not p.exists():
+        return f"No existe: {p}"
+
+    if p.is_file():
+        size = p.stat().st_size
+        return f"Archivo: {p}\n  Tamaño: {size} bytes"
+
+    if p.is_dir():
+        try:
+            items = list(p.iterdir())
+            n_files = sum(1 for i in items if i.is_file())
+            n_dirs = sum(1 for i in items if i.is_dir())
+            sample = [i.name for i in sorted(items)[:8]]
+            sample_str = ", ".join(sample) + ("..." if len(items) > 8 else "")
+            return (
+                f"Directorio: {p}\n"
+                f"  {n_files} archivos, {n_dirs} subdirectorios\n"
+                f"  Contenido: {sample_str}"
+            )
+        except PermissionError:
+            return f"Directorio (sin permiso de lectura): {p}"
+
+    return f"Existe (tipo especial): {p}"
+
+
+registry.register(
+    name="check_path",
+    description=(
+        "Verifica si un path existe en el sistema de archivos y retorna su info. "
+        "Acepta paths ABSOLUTOS (para verificar rutas fuera del workspace) "
+        "o relativos al workspace actual. "
+        "Úsalo para confirmar que una carpeta o archivo fue creado correctamente."
+    ),
+    func=_check_path,
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": (
+                    "Path a verificar. Puede ser absoluto "
+                    "(ej: C:\\\\Users\\\\mathi\\\\Documents\\\\mi-proyecto) "
+                    "o relativo al workspace actual."
+                ),
+            },
         },
         "required": ["path"],
     },

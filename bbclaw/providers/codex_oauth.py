@@ -295,6 +295,13 @@ class CodexOAuthProvider(LLMProvider):
 
     # ── Llamadas LLM — Responses API con SSE ─────────────────────────────────
 
+    @staticmethod
+    def _to_fc_id(call_id: str) -> str:
+        """Convierte IDs de tool calls al formato requerido por Codex (fc_xxx)."""
+        if call_id.startswith("call_"):
+            return "fc_" + call_id[5:]
+        return call_id
+
     def _messages_to_codex_input(self, messages: list[Message]) -> tuple[str, list[dict]]:
         """
         Convierte la lista de mensajes al formato de la Responses API de Codex.
@@ -340,10 +347,11 @@ class CodexOAuthProvider(LLMProvider):
                 if tool_calls:
                     for tc in tool_calls:
                         fn = tc.get("function", {})
+                        fc_id = self._to_fc_id(tc["id"])
                         items.append({
                             "type": "function_call",
-                            "id": tc["id"],
-                            "call_id": tc["id"],
+                            "id": fc_id,
+                            "call_id": fc_id,
                             "name": fn.get("name", ""),
                             "arguments": fn.get("arguments", "{}"),
                         })
@@ -352,7 +360,7 @@ class CodexOAuthProvider(LLMProvider):
             elif role == "tool":
                 input_items.append({
                     "type": "function_call_output",
-                    "call_id": tool_call_id or "",
+                    "call_id": self._to_fc_id(tool_call_id or ""),
                     "output": str(content),
                 })
 
@@ -404,7 +412,7 @@ class CodexOAuthProvider(LLMProvider):
                         if item.get("type") == "function_call":
                             tc_name = item.get("name", "")
                             tc_args = item.get("arguments", "{}")
-                            tc_id = item.get("call_id") or item.get("id") or tc_name
+                            tc_id = item.get("id") or item.get("call_id") or tc_name
                             if tc_name:
                                 try:
                                     args = json.loads(tc_args) if isinstance(tc_args, str) else tc_args

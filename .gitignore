@@ -36,3 +36,6 @@ data/
 # OS
 .DS_Store
 Thumbs.db
+
+# Otros
+**/node_modules/

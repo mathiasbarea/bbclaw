@@ -34,9 +34,11 @@ dir = "skills"
 
 [api]
 # Habilitar la API HTTP interna en http://host:port
-enabled = false
+enabled = true
 host = "127.0.0.1"
 port = 8765
+# Ruta al directorio dist/ del dashboard (dejar vacío para desactivar)
+dashboard_dist = "dashboard/dist"
 
 [agent]
 max_iterations = 20
@@ -44,3 +46,15 @@ command_timeout = 60
 
 [logging]
 level = "INFO"
+
+[improvement]
+enabled = true
+interval_minutes = 10
+max_cycles_per_hour = 3
+token_budget_per_hour = 80000
+idle_minutes_before_run = 10
+
+[autonomous]
+enabled = true
+tick_minutes = 5
+max_concurrent = 1

@@ -48,7 +48,50 @@ CREATE TABLE IF NOT EXISTS config (
     value       TEXT NOT NULL,
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS projects (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    slug            TEXT UNIQUE NOT NULL,
+    description     TEXT DEFAULT '',
+    workspace_path  TEXT NOT NULL,
+    last_used_at    TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS improvement_attempts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    cycle       INTEGER NOT NULL,
+    branch      TEXT,
+    changed_files TEXT DEFAULT '[]',
+    score_before REAL,
+    score_after  REAL,
+    merged      INTEGER DEFAULT 0,
+    tokens_used INTEGER DEFAULT 0,
+    error       TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS objectives (
+    id          TEXT PRIMARY KEY,
+    description TEXT NOT NULL,
+    priority    INTEGER DEFAULT 3,
+    status      TEXT DEFAULT 'active',
+    progress    TEXT DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
+
+
+_global_db: "Database | None" = None
+
+
+def get_db() -> "Database":
+    """Retorna la instancia global de Database. Lanza RuntimeError si no fue inicializada."""
+    if _global_db is None:
+        raise RuntimeError("La base de datos todavía no fue inicializada. Llamá a Database() primero.")
+    return _global_db
 
 
 class Database:
@@ -58,9 +101,11 @@ class Database:
     """
 
     def __init__(self, db_path: str | Path):
+        global _global_db
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._conn: aiosqlite.Connection | None = None
+        _global_db = self
 
     async def connect(self) -> None:
         if self._conn is not None:
@@ -161,3 +206,126 @@ class Database:
     async def get_config(self, key: str, default: Any = None) -> Any:
         row = await self.fetchone("SELECT value FROM config WHERE key = ?", (key,))
         return json.loads(row["value"]) if row else default
+
+    # ── Proyectos ─────────────────────────────────────────────────────────────
+
+    async def get_all_projects(self) -> list[dict]:
+        return await self.fetchall(
+            "SELECT * FROM projects ORDER BY last_used_at DESC, created_at DESC"
+        )
+
+    async def get_project_by_slug(self, slug: str) -> dict | None:
+        return await self.fetchone("SELECT * FROM projects WHERE slug = ?", (slug,))
+
+    async def create_project(
+        self,
+        project_id: str,
+        name: str,
+        slug: str,
+        description: str = "",
+        workspace_path: str = "",
+    ) -> None:
+        await self.execute(
+            "INSERT INTO projects (id, name, slug, description, workspace_path) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (project_id, name, slug, description, workspace_path),
+        )
+
+    async def update_project(
+        self,
+        project_id: str,
+        name: str | None = None,
+        slug: str | None = None,
+        description: str | None = None,
+        color: str | None = None,
+    ) -> None:
+        fields, vals = [], []
+        if name is not None:
+            fields.append("name = ?")
+            vals.append(name)
+        if slug is not None:
+            fields.append("slug = ?")
+            vals.append(slug)
+        if description is not None:
+            fields.append("description = ?")
+            vals.append(description)
+        if color is not None:
+            fields.append("color = ?")
+            vals.append(color)
+        if not fields:
+            return
+        vals.append(project_id)
+        await self.execute(
+            f"UPDATE projects SET {', '.join(fields)} WHERE id = ?",
+            tuple(vals),
+        )
+
+    async def update_project_last_used(self, project_id: str) -> None:
+        await self.execute(
+            "UPDATE projects SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
+            "WHERE id = ?",
+            (project_id,),
+        )
+
+    async def delete_project(self, project_id: str) -> None:
+        await self.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+    # ── Improvement Attempts ───────────────────────────────────────────────────
+
+    async def save_improvement_attempt(self, **kwargs) -> int:
+        cols = list(kwargs.keys())
+        vals = list(kwargs.values())
+        placeholders = ", ".join(["?"] * len(vals))
+        col_names = ", ".join(cols)
+        cur = await self.execute(
+            f"INSERT INTO improvement_attempts ({col_names}) VALUES ({placeholders})",
+            tuple(vals),
+        )
+        return cur.lastrowid
+
+    async def get_recent_improvement_attempts(self, limit: int = 10) -> list[dict]:
+        return await self.fetchall(
+            "SELECT * FROM improvement_attempts ORDER BY id DESC LIMIT ?", (limit,)
+        )
+
+    async def get_improvement_tokens_last_hour(self) -> int:
+        row = await self.fetchone(
+            "SELECT COALESCE(SUM(tokens_used), 0) AS total "
+            "FROM improvement_attempts "
+            "WHERE created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-1 hour')"
+        )
+        return row["total"] if row else 0
+
+    # ── Objectives ─────────────────────────────────────────────────────────────
+
+    async def get_objectives(self, status: str | None = None) -> list[dict]:
+        if status:
+            return await self.fetchall(
+                "SELECT * FROM objectives WHERE status = ? ORDER BY priority ASC, created_at DESC",
+                (status,),
+            )
+        return await self.fetchall(
+            "SELECT * FROM objectives ORDER BY priority ASC, created_at DESC"
+        )
+
+    async def add_objective(self, obj_id: str, description: str, priority: int = 3) -> None:
+        await self.execute(
+            "INSERT INTO objectives (id, description, priority) VALUES (?, ?, ?)",
+            (obj_id, description, priority),
+        )
+
+    async def update_objective_status(
+        self, obj_id: str, status: str, progress: str | None = None
+    ) -> None:
+        if progress is not None:
+            await self.execute(
+                "UPDATE objectives SET status = ?, progress = ?, "
+                "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (status, progress, obj_id),
+            )
+        else:
+            await self.execute(
+                "UPDATE objectives SET status = ?, "
+                "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+                (status, obj_id),
+            )

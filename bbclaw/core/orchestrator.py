@@ -5,9 +5,12 @@ Pipeline completo: contexto → planner → task_queue → síntesis → memoria
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from ..core.agent import Agent, AgentContext
 from ..core.planner import Planner, Plan
@@ -80,6 +83,10 @@ class Orchestrator:
         self.planner: Planner | None = None
         self.task_queue: TaskQueue | None = None
         self.agents: dict[str, Agent] = {}
+        self._improvement_running: bool = False
+        self._last_user_activity: float = time.time()
+        self._improvement_loop: Any = None
+        self._autonomous_loop: Any = None
 
     async def start(self) -> None:
         """Inicializa todos los subsistemas."""
@@ -160,6 +167,22 @@ class Orchestrator:
                 )
             )
 
+        # ── Auto-commit + Background loops ────────────────────────────────────
+        from ..tools.registry import enable_auto_commit
+        enable_auto_commit()
+
+        imp_cfg = self.config.get("improvement", {})
+        if imp_cfg.get("enabled", True):
+            from .improvement_loop import ImprovementLoop
+            self._improvement_loop = ImprovementLoop(self)
+            await self._improvement_loop.start()
+
+        auto_cfg = self.config.get("autonomous", {})
+        if auto_cfg.get("enabled", True):
+            from .autonomous_loop import AutonomousLoop
+            self._autonomous_loop = AutonomousLoop(self)
+            await self._autonomous_loop.start()
+
         logger.info(
             "Sistema %s iniciado. Agentes: %s | Workspace: %s | Skills: %s",
             SYSTEM_NAME,
@@ -168,7 +191,7 @@ class Orchestrator:
             loaded_skills,
         )
 
-    async def run(self, user_input: str) -> str:
+    async def run(self, user_input: str, intent: str = "user") -> str:
         """
         Pipeline completo:
         1. Construir contexto de memoria
@@ -178,6 +201,16 @@ class Orchestrator:
         5. Guardar en memoria
         """
         assert self.planner and self.task_queue and self.db and self.context_builder
+
+        if intent == "user":
+            self._last_user_activity = time.time()
+
+        # Esperar si improvement está corriendo (solo para requests de usuario)
+        if intent == "user" and self._improvement_running:
+            for _ in range(30):
+                await asyncio.sleep(1)
+                if not self._improvement_running:
+                    break
 
         # 1. Contexto de memoria
         memory_ctx = await self.context_builder.build(user_input)
@@ -258,6 +291,10 @@ class Orchestrator:
 
     async def stop(self) -> None:
         """Cierra todos los recursos."""
+        if self._improvement_loop:
+            await self._improvement_loop.stop()
+        if self._autonomous_loop:
+            await self._autonomous_loop.stop()
         await bus.stop()
         if self.db:
             await self.db.close()

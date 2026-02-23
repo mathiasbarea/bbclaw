@@ -19,7 +19,7 @@ from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
 
-PLANNER_SYSTEM_PROMPT = f"""Eres un planificador de tareas para un sistema multi-agente.
+_PLANNER_PROMPT_TEMPLATE = """Eres un planificador de tareas para un sistema multi-agente.
 
 Tu trabajo es analizar la solicitud del usuario y dividirla en subtareas claras.
 Cada subtarea debe:
@@ -30,8 +30,14 @@ Cada subtarea debe:
 Agentes disponibles:
 - "coder": Escribe código, refactoriza, lee/escribe archivos en el workspace, corre comandos/tests.
 - "researcher": Busca información (web/arquitectura), lee archivos, resume contexto.
-- "self_improver": Modifica el propio código del sistema {SYSTEM_NAME}.
+- "self_improver": Modifica el propio código del sistema {system_name}.
 - "generalist": Para tareas que no encajan en otra categoría.
+
+Herramientas disponibles para los agentes:
+{tools_description}
+
+Cuando el usuario pide una acción, usa la herramienta más específica disponible.
+Por ejemplo: "crear un proyecto" → create_project (NO crear carpetas manualmente).
 
 IMPORTANTE: Si la tarea es simple y no necesita dividirse, devuelve UNA sola subtarea.
 No sobre-dividas. Prefiere planes simples.
@@ -49,6 +55,15 @@ Debes responder ÚNICAMENTE con JSON válido, sin texto adicional, siguiendo est
     }}
   ]
 }}"""
+
+
+def _build_planner_prompt() -> str:
+    """Construye el system prompt del planner con las herramientas actuales del registry."""
+    from ..tools.registry import registry
+    return _PLANNER_PROMPT_TEMPLATE.format(
+        system_name=SYSTEM_NAME,
+        tools_description=registry.describe_for_prompt(),
+    )
 
 
 @dataclass
@@ -112,7 +127,7 @@ class Planner:
             user_msg = f"Contexto previo:\n{context}\n\nSolicitud: {user_request}"
 
         messages = [
-            Message(role="system", content=PLANNER_SYSTEM_PROMPT),
+            Message(role="system", content=_build_planner_prompt()),
             Message(role="user", content=user_msg),
         ]
 

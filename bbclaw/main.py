@@ -36,13 +36,16 @@ Comandos: /help /tools /history /logout /exit
 
 HELP_TEXT = """
 **Comandos disponibles:**
-- `/help`    — muestra esta ayuda
-- `/tools`   — lista herramientas disponibles
-- `/history` — muestra últimas conversaciones
-- `/logout`  — elimina el token OAuth guardado
-- `/exit`    — salir del sistema
+- `/help`              — muestra esta ayuda
+- `/tools`             — lista herramientas disponibles
+- `/history`           — muestra últimas conversaciones
+- `/objectives list`   — listar objectives activos
+- `/objectives add <desc>` — agregar nuevo objective
+- `/improvements [N]`  — últimos N improvement attempts (default 5)
+- `/logout`            — elimina el token OAuth guardado
+- `/exit`              — salir del sistema
 
-**Tutto lo demás** se envía al agente.
+**Todo lo demás** se envía al agente.
 """
 
 
@@ -67,8 +70,10 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
 
     while True:
         try:
-            user_input = Prompt.ask("[bold blue]Tú[/bold blue]")
-        except (EOFError, KeyboardInterrupt):
+            user_input = await asyncio.to_thread(
+                Prompt.ask, "[bold blue]Tú[/bold blue]"
+            )
+        except (EOFError, KeyboardInterrupt, asyncio.CancelledError):
             console.print("\n👋 Hasta luego.", style="bold")
             break
 
@@ -114,6 +119,68 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
         if user_input.lower() == "/logout":
             if orchestrator.provider and hasattr(orchestrator.provider, "logout"):
                 await orchestrator.provider.logout()
+            continue
+
+        # /objectives list | add <desc>
+        if user_input.lower().startswith("/objectives"):
+            parts = user_input.split(maxsplit=2)
+            sub = parts[1].lower() if len(parts) > 1 else "list"
+
+            if sub == "list":
+                if orchestrator.db:
+                    objs = await orchestrator.db.get_objectives()
+                    if objs:
+                        lines = []
+                        for o in objs:
+                            status_icon = {"active": "🟢", "paused": "⏸️", "done": "✅"}.get(o["status"], "⚪")
+                            lines.append(
+                                f"{status_icon} **{o['id']}** (p{o['priority']}) — {o['description']}"
+                            )
+                            if o.get("progress"):
+                                lines.append(f"   ↳ Progreso: {o['progress'][:100]}")
+                        console.print(Panel(
+                            Markdown("\n".join(lines)),
+                            title="🎯 Objectives",
+                            border_style="cyan",
+                        ))
+                    else:
+                        console.print("Sin objectives. Usá /objectives add <descripción>", style="dim")
+            elif sub == "add" and len(parts) > 2:
+                desc = parts[2]
+                import uuid as _uuid
+                obj_id = f"obj-{_uuid.uuid4().hex[:8]}"
+                if orchestrator.db:
+                    await orchestrator.db.add_objective(obj_id, desc)
+                    console.print(f"✓ Objective creado: {obj_id}", style="bold green")
+            else:
+                console.print("Uso: /objectives list | /objectives add <descripción>", style="yellow")
+            continue
+
+        # /improvements [N]
+        if user_input.lower().startswith("/improvements"):
+            parts = user_input.split()
+            limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 5
+            if orchestrator.db:
+                attempts = await orchestrator.db.get_recent_improvement_attempts(limit)
+                if attempts:
+                    import json as _json
+                    lines = []
+                    for a in attempts:
+                        merged = "✅" if a.get("merged") else "❌"
+                        files = _json.loads(a.get("changed_files", "[]"))
+                        files_str = ", ".join(files[:3]) if files else "ninguno"
+                        err = f" — Error: {a['error'][:60]}" if a.get("error") else ""
+                        lines.append(
+                            f"{merged} Cycle {a['cycle']} | Branch: {a.get('branch', '?')} | "
+                            f"Archivos: {files_str}{err}"
+                        )
+                    console.print(Panel(
+                        "\n".join(lines),
+                        title="🔧 Improvement Attempts",
+                        border_style="blue",
+                    ))
+                else:
+                    console.print("Sin improvement attempts aún.", style="dim")
             continue
 
         # Llamada al agente
