@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+from contextvars import ContextVar
 from pathlib import Path
 
 import aiofiles
@@ -16,19 +17,23 @@ from .registry import registry
 
 logger = logging.getLogger(__name__)
 
-# Workspace root — se setea al inicializar el sistema
-_WORKSPACE_ROOT: Path = Path("workspace")
+# Workspace root — aislado por asyncio Task via ContextVar.
+# Cada Task (terminal, API request, autonomous loop, improvement loop)
+# tiene su propio valor; set_workspace() solo afecta el contexto actual.
+_workspace_var: ContextVar[Path] = ContextVar(
+    "workspace_root", default=Path("workspace").resolve()
+)
 
 
 def set_workspace(path: str | Path) -> None:
-    global _WORKSPACE_ROOT
-    _WORKSPACE_ROOT = Path(path).resolve()
-    _WORKSPACE_ROOT.mkdir(parents=True, exist_ok=True)
+    resolved = Path(path).resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    _workspace_var.set(resolved)
 
 
 def get_workspace_root() -> Path:
-    """Retorna el workspace root actual. Siempre refleja el valor más reciente."""
-    return _WORKSPACE_ROOT
+    """Retorna el workspace root del contexto async actual."""
+    return _workspace_var.get()
 
 
 def _safe_path(relative_path: str) -> Path:
@@ -36,7 +41,7 @@ def _safe_path(relative_path: str) -> Path:
     Convierte un path relativo a absoluto dentro del workspace.
     Lanza ValueError si el path intenta salir del workspace.
     """
-    base = _WORKSPACE_ROOT.resolve()
+    base = get_workspace_root().resolve()
     target = (base / relative_path).resolve()
     if not str(target).startswith(str(base)):
         raise ValueError(f"Acceso denegado: '{relative_path}' está fuera del workspace")
@@ -84,7 +89,7 @@ async def _list_files(directory: str = ".") -> str:
         raise FileNotFoundError(f"Directorio no encontrado: {directory}")
     items = []
     for item in sorted(full.iterdir()):
-        rel = item.relative_to(_WORKSPACE_ROOT)
+        rel = item.relative_to(get_workspace_root())
         kind = "📁" if item.is_dir() else "📄"
         size = f" ({item.stat().st_size} bytes)" if item.is_file() else ""
         items.append(f"{kind} {rel}{size}")
@@ -254,7 +259,7 @@ async def _search_files(pattern: str, directory: str = ".", max_results: int = 2
                 lines = await f.readlines()
             for lineno, line in enumerate(lines, 1):
                 if compiled.search(line):
-                    rel = item.relative_to(_WORKSPACE_ROOT)
+                    rel = item.relative_to(get_workspace_root())
                     results.append(f"{rel}:{lineno}: {line.rstrip()}")
                     if len(results) >= max_results:
                         break
@@ -321,7 +326,7 @@ async def _check_path(path: str) -> str:
     """
     p = Path(path)
     if not p.is_absolute():
-        p = (_WORKSPACE_ROOT / path).resolve()
+        p = (get_workspace_root() / path).resolve()
 
     if not p.exists():
         return f"No existe: {p}"

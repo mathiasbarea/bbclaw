@@ -221,9 +221,10 @@ class Orchestrator:
         set_workspace(project["workspace_path"])
         await self.db.update_project_last_used(project["id"])
 
-        from ..tools.projects import _current_session
-        if _current_session is not None:
-            _current_session.active_project_id = project["id"]
+        from ..tools.projects import get_current_session
+        session = get_current_session()
+        if session is not None:
+            session.active_project_id = project["id"]
 
         logger.info("Auto-switch a proyecto '%s' (slug: %s)", project["name"], slug)
 

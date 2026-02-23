@@ -10,21 +10,26 @@ import json
 import logging
 import re
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 
 from .registry import registry
 
 logger = logging.getLogger(__name__)
 
-# ── Estado de módulo ──────────────────────────────────────────────────────────
+# ── Estado per-context (aislado por asyncio Task) ────────────────────────────
 
-_current_session = None  # Session | None
+_session_var: ContextVar = ContextVar("current_session", default=None)
 
 
 def set_current_session(session) -> None:
-    """Inyecta la sesión activa para que switch_project pueda actualizarla."""
-    global _current_session
-    _current_session = session
+    """Inyecta la sesión activa en el contexto async actual."""
+    _session_var.set(session)
+
+
+def get_current_session():
+    """Retorna la sesión del contexto async actual (o None)."""
+    return _session_var.get()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -78,7 +83,7 @@ async def list_projects() -> str:
     if not projects:
         return "No hay proyectos creados. Usa create_project para crear uno."
 
-    active_id = getattr(_current_session, "active_project_id", None)
+    active_id = getattr(get_current_session(), "active_project_id", None)
     lines = ["Proyectos disponibles:\n"]
     for p in projects:
         active_mark = " [ACTIVO]" if p["id"] == active_id else ""
@@ -126,14 +131,15 @@ async def switch_project(name_or_slug: str) -> str:
     set_workspace(project["workspace_path"])
     await db.update_project_last_used(project["id"])
 
-    if _current_session is not None:
-        _current_session.active_project_id = project["id"]
+    session = get_current_session()
+    if session is not None:
+        session.active_project_id = project["id"]
         try:
             await db.update_session(
-                session_id=_current_session.session_id,
-                summary=_current_session.summary,
-                history_json=json.dumps(_current_session.history, ensure_ascii=False),
-                last_activity_at=_current_session.last_activity_at,
+                session_id=session.session_id,
+                summary=session.summary,
+                history_json=json.dumps(session.history, ensure_ascii=False),
+                last_activity_at=session.last_activity_at,
                 active_project_id=project["id"],
             )
         except Exception as e:
@@ -342,15 +348,16 @@ async def delete_project(name_or_slug: str) -> str:
 
     await db.delete_project(project["id"])
 
-    if _current_session is not None and getattr(_current_session, "active_project_id", None) == project["id"]:
-        _current_session.active_project_id = None
+    session = get_current_session()
+    if session is not None and getattr(session, "active_project_id", None) == project["id"]:
+        session.active_project_id = None
         set_workspace("workspace")
         try:
             await db.update_session(
-                session_id=_current_session.session_id,
-                summary=_current_session.summary,
-                history_json=json.dumps(_current_session.history, ensure_ascii=False),
-                last_activity_at=_current_session.last_activity_at,
+                session_id=session.session_id,
+                summary=session.summary,
+                history_json=json.dumps(session.history, ensure_ascii=False),
+                last_activity_at=session.last_activity_at,
                 active_project_id=None,
             )
         except Exception as e:
@@ -395,7 +402,7 @@ async def set_project_objective(objective: str, name_or_slug: str = "") -> str:
                 return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
             return f"Proyecto no encontrado: '{name_or_slug}'."
     else:
-        active_id = getattr(_current_session, "active_project_id", None)
+        active_id = getattr(get_current_session(), "active_project_id", None)
         if not active_id:
             return "No hay proyecto activo. Especificá un proyecto o activá uno con switch_project."
         project = await db.fetchone("SELECT * FROM projects WHERE id = ?", (active_id,))
@@ -436,7 +443,7 @@ async def get_project_objective(name_or_slug: str = "") -> str:
                 return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
             return f"Proyecto no encontrado: '{name_or_slug}'."
     else:
-        active_id = getattr(_current_session, "active_project_id", None)
+        active_id = getattr(get_current_session(), "active_project_id", None)
         if not active_id:
             return "No hay proyecto activo. Especificá un proyecto o activá uno con switch_project."
         project = await db.fetchone("SELECT * FROM projects WHERE id = ?", (active_id,))

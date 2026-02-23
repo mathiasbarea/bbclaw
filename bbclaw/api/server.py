@@ -443,12 +443,13 @@ def create_app(orchestrator) -> Any:
 
     @api.get("/active-project")
     async def active_project():
-        from bbclaw.tools.projects import _current_session
-        if _current_session and getattr(_current_session, "active_project_id", None):
+        from bbclaw.tools.projects import get_current_session
+        session = get_current_session()
+        if session and getattr(session, "active_project_id", None):
             db = _db()
             project = await db.fetchone(
                 "SELECT id, name, slug, objective FROM projects WHERE id = ?",
-                (_current_session.active_project_id,),
+                (session.active_project_id,),
             )
             if project:
                 return {

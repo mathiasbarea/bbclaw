@@ -205,6 +205,10 @@ class ImprovementLoop:
         return collector is not None and collector.has_actionable_errors()
 
     async def _run_cycle(self) -> None:
+        # Workspace = repo root para que los agentes accedan a bbclaw/
+        from ..tools.filesystem import set_workspace
+        set_workspace(Path.cwd())
+
         self._cycle_count += 1
         cycle = self._cycle_count
         branch = f"improve/{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"

@@ -205,6 +205,11 @@ class AutonomousLoop:
                 if not self.orch.db:
                     continue
 
+                # Reset workspace al default para scheduled items
+                from ..tools.filesystem import set_workspace
+                default_ws = self.orch.config.get("workspace", {}).get("root", "workspace")
+                set_workspace(default_ws)
+
                 # SIEMPRE procesar scheduled items en cada tick
                 await self._process_scheduled_items()
 
@@ -235,6 +240,9 @@ class AutonomousLoop:
                     continue
 
                 proj = eligible[0]  # round-robin por last_autonomous_at ASC
+
+                # Switch workspace al del proyecto antes de correr el agente
+                set_workspace(proj["workspace_path"])
 
                 self._running = True
                 self._current_objective = proj["id"]
