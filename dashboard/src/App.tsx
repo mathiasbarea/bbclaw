@@ -373,6 +373,11 @@ function App() {
   const lastPulse = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
+  const activeProjectName = useMemo(() => {
+    const activeProject = projects.find((project) => (project as { isActive?: boolean }).isActive);
+    return activeProject?.name || 'None';
+  }, [projects]);
+
   const triggerPulse = useCallback(() => {
     const now = Date.now();
     if (now - lastPulse.current > 2000) {
@@ -1869,6 +1874,10 @@ function App() {
           </motion.div>
         ) : null}
       </AnimatePresence>
+
+      <div style={{ marginTop: '0.75rem', marginBottom: '0.25rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+        Active project: <strong>{activeProjectName}</strong>
+      </div>
 
       <ChatInput
         onSendMessage={handleSendMessage}
