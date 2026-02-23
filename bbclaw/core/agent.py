@@ -35,6 +35,7 @@ class AgentResult:
     success: bool
     output: str
     tool_calls_made: int = 0
+    tokens_used: int = 0
     error: str | None = None
 
 
@@ -91,6 +92,7 @@ Reglas:
         ]
         tools = self.tool_registry.get_schemas()
         tool_calls_count = 0
+        tokens_used = 0
 
         for iteration in range(self.max_iterations):
             logger.debug("[%s] Iteración %d/%d", self.name, iteration + 1, self.max_iterations)
@@ -99,6 +101,7 @@ Reglas:
             api_messages = self._build_api_messages(messages)
 
             response = await self._complete_with_retry(api_messages, tools)
+            tokens_used += response.usage.get("total_tokens", 0)
 
             # Si el LLM quiere hacer tool calls → ejecutar y continuar
             if response.tool_calls:
@@ -134,13 +137,14 @@ Reglas:
 
             # Respuesta final del LLM
             final_content = response.content or ""
-            logger.info("[%s] Completado en %d iteraciones", self.name, iteration + 1)
+            logger.info("[%s] Completado en %d iteraciones (%d tokens)", self.name, iteration + 1, tokens_used)
             return AgentResult(
                 task_id=context.task_id,
                 agent_name=self.name,
                 success=True,
                 output=final_content,
                 tool_calls_made=tool_calls_count,
+                tokens_used=tokens_used,
             )
 
         # Si agotamos iteraciones sin finish_reason=stop
@@ -150,6 +154,7 @@ Reglas:
             success=False,
             output="",
             tool_calls_made=tool_calls_count,
+            tokens_used=tokens_used,
             error=f"Máximo de iteraciones ({self.max_iterations}) alcanzado sin respuesta final",
         )
 

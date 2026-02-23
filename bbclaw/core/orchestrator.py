@@ -92,6 +92,7 @@ class Orchestrator:
         self._autonomous_loop: Any = None
         self._error_collector: Any = None
         self._pending_reminders: list[dict] = []
+        self._last_run_tokens: int = 0
 
     async def start(self) -> None:
         """Inicializa todos los subsistemas."""
@@ -274,6 +275,7 @@ class Orchestrator:
             memory_context=memory_ctx,
         )
         result = await agent.run(ctx)
+        self._last_run_tokens = result.tokens_used
         response = result.output if result.success else f"Error: {result.error}"
 
         # Guardar en memoria (misma lógica que run() pasos 5-6)
@@ -349,6 +351,7 @@ class Orchestrator:
 
         # 3. Ejecutar plan
         plan = await self.task_queue.execute(plan, memory_context=memory_ctx)
+        self._last_run_tokens = self.task_queue.last_run_tokens
 
         # 4. Sintetizar respuesta
         response = await self._synthesize(user_input, plan)

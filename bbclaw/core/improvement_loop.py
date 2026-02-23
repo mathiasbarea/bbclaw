@@ -42,9 +42,10 @@ class ImprovementLoop:
                 self._consecutive_no_improvement = state.get("consecutive_no_improvement", 0)
                 self._cycle_count = state.get("cycle_count", 0)
                 self._last_run_at = state.get("last_run_at")
+                self._last_cycle_tokens = state.get("last_cycle_tokens", 0)
                 logger.info(
-                    "Improvement state restored: cycles=%d, no_improvement=%d, last_run=%s",
-                    self._cycle_count, self._consecutive_no_improvement, self._last_run_at,
+                    "Improvement state restored: cycles=%d, no_improvement=%d, last_run=%s, last_tokens=%d",
+                    self._cycle_count, self._consecutive_no_improvement, self._last_run_at, self._last_cycle_tokens,
                 )
         except Exception as e:
             logger.warning("Could not load improvement state: %s", e)
@@ -58,6 +59,7 @@ class ImprovementLoop:
                 "consecutive_no_improvement": self._consecutive_no_improvement,
                 "cycle_count": self._cycle_count,
                 "last_run_at": self._last_run_at,
+                "last_cycle_tokens": self._last_cycle_tokens,
             })
         except Exception:
             pass
@@ -212,14 +214,6 @@ class ImprovementLoop:
 
         logger.info("Improvement cycle %d: creando branch %s", cycle, branch)
 
-        # Snapshot tokens before cycle to compute delta
-        tokens_before = 0
-        if self.orch.db:
-            try:
-                tokens_before = await self.orch.db.get_improvement_tokens_last_hour()
-            except Exception:
-                pass
-
         try:
             # 1. Crear branch desde main
             await self._git_exec("git", "checkout", "-b", branch)
@@ -303,6 +297,9 @@ class ImprovementLoop:
             except Exception:
                 pass
 
+        # Capture tokens used from the orchestrator's last run
+        self._last_cycle_tokens = getattr(self.orch, '_last_run_tokens', 0)
+
         # Guardar intento en DB
         self._last_run_at = datetime.now(timezone.utc).isoformat()
         if merged:
@@ -316,18 +313,11 @@ class ImprovementLoop:
                     branch=branch,
                     changed_files=json.dumps(changed_files),
                     merged=1 if merged else 0,
+                    tokens_used=self._last_cycle_tokens,
                     error=error_msg,
                 )
             except Exception as e:
                 logger.error("Error guardando improvement attempt: %s", e)
-
-        # Compute tokens used in this cycle
-        if self.orch.db:
-            try:
-                tokens_after = await self.orch.db.get_improvement_tokens_last_hour()
-                self._last_cycle_tokens = max(0, tokens_after - tokens_before)
-            except Exception:
-                pass
 
         await self._save_persisted_state()
 

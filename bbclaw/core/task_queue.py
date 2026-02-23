@@ -32,6 +32,7 @@ class TaskQueue:
         """
         self.agents = agents
         self._memory_context: str = ""
+        self.last_run_tokens: int = 0
 
     async def execute(self, plan: Plan, memory_context: str = "") -> Plan:
         """
@@ -40,6 +41,7 @@ class TaskQueue:
         Devuelve el plan con resultados completos.
         """
         self._memory_context = memory_context
+        self.last_run_tokens = 0
         completed_ids: set[str] = set()
 
         await bus.publish(Event("plan.started", "task_queue", {"plan_id": plan.id, "tasks": len(plan.tasks)}))
@@ -121,10 +123,11 @@ class TaskQueue:
 
         try:
             result = await agent.run(ctx)
+            self.last_run_tokens += result.tokens_used
             if result.success:
                 task.status = "done"
                 task.result = result.output
-                logger.info("Tarea '%s' completada (%d tool calls)", task.name, result.tool_calls_made)
+                logger.info("Tarea '%s' completada (%d tool calls, %d tokens)", task.name, result.tool_calls_made, result.tokens_used)
                 await bus.publish(Event("task.completed", agent_name, {"task_id": task.id, "output": result.output[:200]}))
             else:
                 task.status = "failed"
