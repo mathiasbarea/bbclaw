@@ -22,6 +22,7 @@ Rutas:
   POST /api/task-templates/{id}/deactivate
   POST /api/prompt
   GET  /api/chat/history
+  GET  /api/active-project
   GET  /api/events  (SSE)
 """
 
@@ -392,6 +393,21 @@ def create_app(orchestrator) -> Any:
                 "taskCounts": {"pending": 0, "running": 0, "blocked": 0, "completed": 0, "failed": 0, "canceled": 0},
             })
         return items
+
+    # ── Active project ─────────────────────────────────────────────────────────
+
+    @api.get("/active-project")
+    async def active_project():
+        from bbclaw.tools.projects import _current_session
+        if _current_session and getattr(_current_session, "active_project_id", None):
+            db = _db()
+            project = await db.fetchone(
+                "SELECT id, name, slug FROM projects WHERE id = ?",
+                (_current_session.active_project_id,),
+            )
+            if project:
+                return {"id": project["id"], "name": project["name"], "slug": project["slug"]}
+        return {"id": None, "name": None, "slug": None}
 
     # ── Task Templates (stub) ─────────────────────────────────────────────────
 

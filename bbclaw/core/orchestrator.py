@@ -225,6 +225,16 @@ class Orchestrator:
 
         logger.info("Auto-switch a proyecto '%s' (slug: %s)", project["name"], slug)
 
+        try:
+            from ..api.server import _broadcast
+            _broadcast("project_changed", {
+                "projectId": project["id"],
+                "projectName": project["name"],
+                "projectSlug": project["slug"],
+            })
+        except Exception:
+            pass
+
         # Limpiar #mención del texto
         start = match.start()
         if start < len(text) and text[start] == ' ':

@@ -137,6 +137,16 @@ async def switch_project(name_or_slug: str) -> str:
         except Exception as e:
             logger.warning("No se pudo persistir active_project_id en DB: %s", e)
 
+    try:
+        from bbclaw.api.server import _broadcast
+        _broadcast("project_changed", {
+            "projectId": project["id"],
+            "projectName": project["name"],
+            "projectSlug": project["slug"],
+        })
+    except Exception:
+        pass
+
     desc = project.get("description") or ""
     return (
         f"Proyecto activo: {project['name']} (slug: {project['slug']})\n"
