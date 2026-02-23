@@ -204,12 +204,23 @@ class ImprovementLoop:
             if collector and collector.has_actionable_errors():
                 error_context = collector.format_for_prompt()
 
+            cfg = self.orch.config.get("improvement", {})
+            threshold = cfg.get("consecutive_no_improvement_threshold", 20)
+
             if error_context:
                 prompt = (
                     "MODO FIX: Se detectaron errores en el sistema que necesitan corrección urgente.\n\n"
                     f"{error_context}\n\n"
                     "Diagnosticá la causa raíz de cada error y corregí el código fuente. "
                     "Priorizá fixes que eviten que el error se repita. Hacé cambios mínimos y seguros."
+                )
+            elif self._consecutive_no_improvement >= threshold:
+                prompt = (
+                    f"Sos el auto-improver del sistema. Llevás {self._consecutive_no_improvement} ciclos "
+                    "sin lograr una mejora mergeada. Cambiá de estrategia radicalmente: "
+                    "en vez de mejoras incrementales, buscá un área completamente distinta del código. "
+                    "Revisá tests que fallan, features documentados pero no implementados, o "
+                    "código muerto que se pueda eliminar. Hacé cambios pequeños y seguros."
                 )
             else:
                 prompt = (
@@ -283,6 +294,8 @@ class ImprovementLoop:
                 )
             except Exception as e:
                 logger.error("Error guardando improvement attempt: %s", e)
+
+        await self._save_persisted_state()
 
     async def _git_exec(self, *args: str) -> str:
         proc = await asyncio.create_subprocess_exec(
