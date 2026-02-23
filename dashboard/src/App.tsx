@@ -75,14 +75,16 @@ type PendingConfirmAction =
 interface ImprovementStatus {
   improvementLoop: {
     isRunning: boolean;
+    cycleCount?: number;
     consecutiveNoImprovement: number;
-    lastRunAt?: number;
+    lastRunAt?: string | null;
     lastScoreDelta?: number | null;
     tokensLastHour: number;
     tokenBudget: number;
   };
   autonomousLoop: {
     isRunning: boolean;
+    currentObjective?: string | null;
     activeObjectives: number;
   };
   behavioralSuite: {
@@ -332,7 +334,7 @@ const taskItemMotionTransition = {
 
 function App() {
   const dsUrl = 'http://localhost:8765';
-  const [dashboardMode, setDashboardMode] = useState<'business' | 'live'>('business');
+  const [dashboardMode, setDashboardMode] = useState<'business' | 'live'>('live');
 
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [businessMetrics, setBusinessMetrics] = useState<BusinessOverviewMetrics | null>(null);
@@ -1175,35 +1177,86 @@ function App() {
             <div className="glass-card" style={{padding: "0.75rem"}}>
               <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem"}}>
                 <span style={{fontSize: "0.8rem", fontWeight: 600}}>🔄 Improvement Loop</span>
-                <span className={`status-chip ${improvementStatus?.improvementLoop.isRunning ? "status-running" : "status-idle"}`}>
-                  {improvementStatus?.improvementLoop.isRunning ? "Running" : "Idle"}
+                <span style={{
+                  fontSize: "0.65rem", fontWeight: 600, padding: "2px 8px", borderRadius: "9999px",
+                  background: improvementStatus?.improvementLoop.isRunning ? "rgba(34,197,94,0.15)" : "rgba(148,163,184,0.1)",
+                  color: improvementStatus?.improvementLoop.isRunning ? "#22c55e" : "#64748b",
+                  border: `1px solid ${improvementStatus?.improvementLoop.isRunning ? "rgba(34,197,94,0.3)" : "rgba(148,163,184,0.2)"}`,
+                }}>
+                  {improvementStatus?.improvementLoop.isRunning ? "● Running" : "○ Idle"}
                 </span>
               </div>
-              {improvementStatus?.improvementLoop.lastScoreDelta != null && (
-                <div style={{fontSize: "0.75rem", color: improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "#22c55e" : "#ef4444"}}>
-                  Last Δ: {improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "+" : ""}{improvementStatus.improvementLoop.lastScoreDelta.toFixed(4)}
+              {/* Stats row */}
+              <div style={{display: "flex", gap: "0.75rem", marginBottom: "0.4rem", flexWrap: "wrap"}}>
+                <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
+                  Cycles: <span style={{color: "var(--text-primary, #e2e8f0)", fontWeight: 600}}>{improvementStatus?.improvementLoop.cycleCount ?? 0}</span>
+                </div>
+                {improvementStatus?.improvementLoop.lastScoreDelta != null && (
+                  <div style={{fontSize: "0.7rem", color: improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "#22c55e" : "#ef4444"}}>
+                    Last Δ: {improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "+" : ""}{improvementStatus.improvementLoop.lastScoreDelta.toFixed(4)}
+                  </div>
+                )}
+                {(improvementStatus?.improvementLoop.consecutiveNoImprovement ?? 0) > 0 && (
+                  <div style={{fontSize: "0.7rem", color: "#f59e0b"}}>
+                    Stale: {improvementStatus!.improvementLoop.consecutiveNoImprovement}x
+                  </div>
+                )}
+              </div>
+              {/* Last run */}
+              {improvementStatus?.improvementLoop.lastRunAt && (
+                <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginBottom: "0.4rem"}}>
+                  Last run: {(() => {
+                    try {
+                      const d = new Date(improvementStatus.improvementLoop.lastRunAt);
+                      const now = Date.now();
+                      const diffMin = Math.round((now - d.getTime()) / 60000);
+                      if (diffMin < 1) return "just now";
+                      if (diffMin < 60) return `${diffMin}m ago`;
+                      const diffH = Math.round(diffMin / 60);
+                      return `${diffH}h ago`;
+                    } catch { return improvementStatus.improvementLoop.lastRunAt; }
+                  })()}
                 </div>
               )}
-              {improvementStatus?.improvementLoop.consecutiveNoImprovement > 0 && (
-                <div style={{fontSize: "0.75rem", color: "#f59e0b"}}>
-                  No improvement: {improvementStatus.improvementLoop.consecutiveNoImprovement} cycles
+              {/* Token budget bar */}
+              <div>
+                <div style={{display: "flex", justifyContent: "space-between", fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginBottom: "3px"}}>
+                  <span>Token budget/hr</span>
+                  <span>{improvementStatus ? `${(improvementStatus.improvementLoop.tokensLastHour / 1000).toFixed(1)}k / ${(improvementStatus.improvementLoop.tokenBudget / 1000).toFixed(0)}k` : "—"}</span>
                 </div>
-              )}
-              <div style={{marginTop: "0.5rem"}}>
-                <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginBottom: "0.2rem"}}>
-                  Token budget/hr
-                </div>
-                <div style={{background: "rgba(255,255,255,0.08)", borderRadius: "4px", height: "6px", overflow: "hidden"}}>
+                <div style={{background: "rgba(255,255,255,0.06)", borderRadius: "4px", height: "5px", overflow: "hidden"}}>
                   <div style={{
-                    background: improvementStatus && improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget > 0.8 ? "#ef4444" : "#6366f1",
+                    background: improvementStatus && improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget > 0.8
+                      ? "linear-gradient(90deg, #ef4444, #f87171)"
+                      : "linear-gradient(90deg, #6366f1, #818cf8)",
                     width: `${Math.min(100, improvementStatus ? (improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget) * 100 : 0)}%`,
                     height: "100%", borderRadius: "4px", transition: "width 0.5s ease"
                   }} />
                 </div>
-                <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.2rem"}}>
-                  {improvementStatus ? `${(improvementStatus.improvementLoop.tokensLastHour / 1000).toFixed(1)}k / ${(improvementStatus.improvementLoop.tokenBudget / 1000).toFixed(0)}k` : "—"}
-                </div>
               </div>
+            </div>
+
+            {/* Autonomous Loop */}
+            <div className="glass-card" style={{padding: "0.75rem"}}>
+              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.4rem"}}>
+                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🎯 Autonomous Loop</span>
+                <span style={{
+                  fontSize: "0.65rem", fontWeight: 600, padding: "2px 8px", borderRadius: "9999px",
+                  background: improvementStatus?.autonomousLoop.isRunning ? "rgba(34,197,94,0.15)" : "rgba(148,163,184,0.1)",
+                  color: improvementStatus?.autonomousLoop.isRunning ? "#22c55e" : "#64748b",
+                  border: `1px solid ${improvementStatus?.autonomousLoop.isRunning ? "rgba(34,197,94,0.3)" : "rgba(148,163,184,0.2)"}`,
+                }}>
+                  {improvementStatus?.autonomousLoop.isRunning ? "● Active" : "○ Idle"}
+                </span>
+              </div>
+              <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
+                <span style={{color: "var(--text-primary, #e2e8f0)", fontWeight: 600}}>{improvementStatus?.autonomousLoop.activeObjectives ?? 0}</span> active objective{(improvementStatus?.autonomousLoop.activeObjectives ?? 0) !== 1 ? "s" : ""}
+              </div>
+              {improvementStatus?.autonomousLoop.currentObjective && (
+                <div style={{fontSize: "0.65rem", color: "#818cf8", marginTop: "0.3rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap"}}>
+                  Working on: {improvementStatus.autonomousLoop.currentObjective}
+                </div>
+              )}
             </div>
 
             {/* Behavioral Suite */}
@@ -1216,19 +1269,6 @@ function App() {
                 <span style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
                   {improvementStatus ? `${improvementStatus.behavioralSuite.casesPassed}/${improvementStatus.behavioralSuite.casesTotal} cases` : ""}
                 </span>
-              </div>
-            </div>
-
-            {/* Autonomous Loop */}
-            <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🎯 Autonomous Loop</span>
-                <span className={`status-chip ${improvementStatus?.autonomousLoop.isRunning ? "status-running" : "status-idle"}`}>
-                  {improvementStatus?.autonomousLoop.isRunning ? "Active" : "Idle"}
-                </span>
-              </div>
-              <div style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
-                {improvementStatus?.autonomousLoop.activeObjectives ?? 0} active objectives
               </div>
             </div>
 
