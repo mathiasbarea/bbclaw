@@ -57,7 +57,6 @@ consecutive_no_improvement_threshold = 20
 
 [autonomous]
 enabled = true
-tick_minutes = 5               # floor — mínimo entre ticks (minutos)
-max_idle_tick_minutes = 60     # ceiling — tick cuando no hay proyectos con objective
-target_minutes_per_project = 30 # cada cuánto debería atenderse cada proyecto
+tick_minutes = 5                    # intervalo fijo del loop (scheduled items + check)
+max_objective_runs_per_day = 4      # máximo de veces que un proyecto procesa su objetivo en 24h
 max_concurrent = 1

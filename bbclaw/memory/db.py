@@ -132,6 +132,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_scheduled_next_run ON scheduled_items(next_run_at) WHERE status = 'active'",
             "ALTER TABLE projects ADD COLUMN objective TEXT DEFAULT ''",
             "ALTER TABLE projects ADD COLUMN last_autonomous_at TEXT",
+            "ALTER TABLE projects ADD COLUMN autonomous_runs_today INTEGER DEFAULT 0",
+            "ALTER TABLE projects ADD COLUMN autonomous_runs_date TEXT DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -309,10 +311,21 @@ class Database:
         )
 
     async def update_project_last_autonomous(self, project_id: str) -> None:
-        await self.execute(
-            "UPDATE projects SET last_autonomous_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') "
-            "WHERE id = ?",
+        today = datetime.utcnow().strftime("%Y-%m-%d")
+        row = await self.fetchone(
+            "SELECT autonomous_runs_date, autonomous_runs_today FROM projects WHERE id = ?",
             (project_id,),
+        )
+        if row and row.get("autonomous_runs_date") == today:
+            new_count = (row.get("autonomous_runs_today") or 0) + 1
+        else:
+            new_count = 1
+        await self.execute(
+            "UPDATE projects SET "
+            "last_autonomous_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), "
+            "autonomous_runs_today = ?, autonomous_runs_date = ? "
+            "WHERE id = ?",
+            (new_count, today, project_id),
         )
 
     async def get_recent_autonomous_conversations(

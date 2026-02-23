@@ -1,11 +1,18 @@
 """
 Ciclo autónomo de procesamiento de proyectos con objective.
-Corre en background, toma proyectos con objective definido y trabaja en ellos
-cuando el sistema está idle y no hay improvement corriendo.
+Corre en background cada tick_minutes (default 5 min):
+  1. Procesa scheduled items y reminders (SIEMPRE, cada tick)
+  2. Procesa objetivos de proyectos (frecuencia dinámica según cantidad)
 
-Frecuencia dinámica: el tick se ajusta según la cantidad de proyectos con
-objective, apuntando a que cada proyecto reciba atención cada
-~target_minutes_per_project minutos (default 30).
+Frecuencia de objetivos (tier-based):
+  0 proyectos       → no procesa
+  1-6 proyectos     → cada 60 min
+  7-14 proyectos    → cada 30 min
+  15-25 proyectos   → cada 15 min
+  26-40 proyectos   → cada 10 min
+  41+ proyectos     → cada 5 min
+
+Cap diario: max_objective_runs_per_day (default 4) por proyecto en 24h.
 """
 
 from __future__ import annotations
@@ -30,6 +37,8 @@ class AutonomousLoop:
         self._current_objective: str | None = None
         self._last_tick_at: str | None = None
         self._tick_minutes: int = 5
+        self._last_objective_run_at: object = None  # datetime from now_utc()
+        self._objective_interval_minutes: int = 0
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop())
@@ -52,29 +61,33 @@ class AutonomousLoop:
             "activeObjectives": 0,  # overridden by API with real DB count
             "lastTickAt": self._last_tick_at,
             "tickMinutes": self._tick_minutes,
+            "objectiveIntervalMinutes": self._objective_interval_minutes,
         }
 
-    def _compute_tick(self, project_count: int) -> int:
+    def _compute_objective_interval(self, project_count: int) -> int:
         """
-        Frecuencia dinámica basada en cantidad de proyectos con objective.
+        Intervalo (en minutos) entre procesamientos de objetivos,
+        basado en cantidad de proyectos con objective activo.
 
-        Lógica: target_per_project / num_projects, con floor y ceiling.
-          - 0 proyectos → ceiling (nada que hacer, tick lento)
-          - 1 proyecto  → target_per_project (ej. 30 min)
-          - 6 proyectos → floor (ej. 5 min)
-
-        Config keys (en [autonomous]):
-          tick_minutes              = 5   (floor — mínimo entre ticks)
-          target_minutes_per_project = 30  (cada cuánto debería atenderse cada proyecto)
+        Tiers:
+          0 proyectos       → 0 (no procesar)
+          1-6 proyectos     → 60 min
+          7-14 proyectos    → 30 min
+          15-25 proyectos   → 15 min
+          26-40 proyectos   → 10 min
+          41+ proyectos     → 5 min
         """
-        cfg = self.orch.config.get("autonomous", {})
-        floor = cfg.get("tick_minutes", 5)
-        ceiling = cfg.get("max_idle_tick_minutes", 60)
-        target = cfg.get("target_minutes_per_project", 30)
-
         if project_count <= 0:
-            return ceiling
-        return max(floor, min(ceiling, target // project_count))
+            return 0
+        if project_count <= 6:
+            return 60
+        if project_count <= 14:
+            return 30
+        if project_count <= 25:
+            return 15
+        if project_count <= 40:
+            return 10
+        return 5
 
     async def _build_objective_prompt(self, proj: dict) -> str:
         """
@@ -173,16 +186,9 @@ class AutonomousLoop:
             try:
                 from .scheduler import next_aligned_tick, now_utc, to_iso
 
-                # Tick dinámico: recalcular en cada iteración
-                project_count = 0
-                if self.orch.db:
-                    try:
-                        projs = await self.orch.db.get_projects_with_objective()
-                        project_count = len(projs)
-                    except Exception:
-                        pass
-
-                tick = self._compute_tick(project_count)
+                # Tick fijo — siempre tick_minutes del config (default 5 min)
+                cfg = self.orch.config.get("autonomous", {})
+                tick = cfg.get("tick_minutes", 5)
                 self._tick_minutes = tick
 
                 target = next_aligned_tick(tick, now_utc())
@@ -199,15 +205,36 @@ class AutonomousLoop:
                 if not self.orch.db:
                     continue
 
-                # Process scheduled items FIRST
+                # SIEMPRE procesar scheduled items en cada tick
                 await self._process_scheduled_items()
 
-                # Obtener proyectos con objective (round-robin: least-recently-processed first)
+                # ── Procesamiento de objetivos (frecuencia dinámica) ─────
                 projects = await self.orch.db.get_projects_with_objective()
-                if not projects:
+                project_count = len(projects)
+                interval = self._compute_objective_interval(project_count)
+                self._objective_interval_minutes = interval
+
+                if interval <= 0 or not projects:
                     continue
 
-                proj = projects[0]
+                now = now_utc()
+                if self._last_objective_run_at is not None:
+                    elapsed_min = (now - self._last_objective_run_at).total_seconds() / 60
+                    if elapsed_min < interval:
+                        continue
+
+                # Filtrar proyectos que superaron el cap diario
+                max_daily = cfg.get("max_objective_runs_per_day", 4)
+                today = now.strftime("%Y-%m-%d")
+                eligible = [
+                    p for p in projects
+                    if p.get("autonomous_runs_date") != today
+                    or (p.get("autonomous_runs_today") or 0) < max_daily
+                ]
+                if not eligible:
+                    continue
+
+                proj = eligible[0]  # round-robin por last_autonomous_at ASC
 
                 self._running = True
                 self._current_objective = proj["id"]
@@ -217,11 +244,9 @@ class AutonomousLoop:
                         self.orch.run(prompt, intent="autonomous"),
                         timeout=300,
                     )
-                    # Marcar que este proyecto fue procesado (round-robin)
                     await self.orch.db.update_project_last_autonomous(proj["id"])
                     logger.info("Autonomous: progreso en proyecto '%s'", proj["name"])
                 except asyncio.TimeoutError:
-                    # Aún así marcar para no bloquear la rotación
                     await self.orch.db.update_project_last_autonomous(proj["id"])
                     logger.warning("Autonomous: timeout en proyecto '%s'", proj["name"])
                 except Exception as e:
@@ -229,6 +254,8 @@ class AutonomousLoop:
                 finally:
                     self._running = False
                     self._current_objective = None
+
+                self._last_objective_run_at = now
 
             except asyncio.CancelledError:
                 raise
