@@ -29,6 +29,8 @@ class ImprovementLoop:
         self._last_run_at: str | None = None
         self._last_score_delta: float | None = None
         self._consecutive_no_improvement = 0
+        self._tokens_last_hour: int = 0
+        self._last_cycle_tokens: int = 0
 
     async def _load_persisted_state(self) -> None:
         """Restore counters from DB so they survive restarts."""
@@ -76,16 +78,31 @@ class ImprovementLoop:
 
     @property
     def status(self) -> dict:
-        tokens_last_hour = 0
-        budget = self.orch.config.get("improvement", {}).get("token_budget_per_hour", 80000)
+        cfg = self.orch.config.get("improvement", {})
+        budget = cfg.get("token_budget_per_hour", 80000)
+        interval_minutes = cfg.get("interval_minutes", 360)
+
+        # Compute next run time
+        next_run_at: str | None = None
+        if self._last_run_at:
+            try:
+                from datetime import timedelta
+                last = datetime.fromisoformat(self._last_run_at.replace("Z", "+00:00"))
+                nxt = last + timedelta(minutes=interval_minutes)
+                next_run_at = nxt.isoformat()
+            except Exception:
+                pass
+
         return {
             "isRunning": self._running,
             "cycleCount": self._cycle_count,
             "consecutiveNoImprovement": self._consecutive_no_improvement,
             "lastRunAt": self._last_run_at,
             "lastScoreDelta": self._last_score_delta,
-            "tokensLastHour": tokens_last_hour,
+            "lastCycleTokens": self._last_cycle_tokens,
             "tokenBudget": budget,
+            "nextRunAt": next_run_at,
+            "intervalMinutes": interval_minutes,
         }
 
     async def _loop(self) -> None:
@@ -134,6 +151,7 @@ class ImprovementLoop:
         budget = cfg.get("token_budget_per_hour", 80000)
         if self.orch.db:
             tokens = await self.orch.db.get_improvement_tokens_last_hour()
+            self._tokens_last_hour = tokens
             if tokens >= budget:
                 return False
 
@@ -193,6 +211,14 @@ class ImprovementLoop:
         changed_files: list[str] = []
 
         logger.info("Improvement cycle %d: creando branch %s", cycle, branch)
+
+        # Snapshot tokens before cycle to compute delta
+        tokens_before = 0
+        if self.orch.db:
+            try:
+                tokens_before = await self.orch.db.get_improvement_tokens_last_hour()
+            except Exception:
+                pass
 
         try:
             # 1. Crear branch desde main
@@ -294,6 +320,14 @@ class ImprovementLoop:
                 )
             except Exception as e:
                 logger.error("Error guardando improvement attempt: %s", e)
+
+        # Compute tokens used in this cycle
+        if self.orch.db:
+            try:
+                tokens_after = await self.orch.db.get_improvement_tokens_last_hour()
+                self._last_cycle_tokens = max(0, tokens_after - tokens_before)
+            except Exception:
+                pass
 
         await self._save_persisted_state()
 

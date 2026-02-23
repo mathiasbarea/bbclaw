@@ -294,8 +294,10 @@ def create_app(orchestrator) -> Any:
                 "consecutiveNoImprovement": 0,
                 "lastRunAt": None,
                 "lastScoreDelta": None,
-                "tokensLastHour": 0,
+                "lastCycleTokens": 0,
                 "tokenBudget": 80000,
+                "nextRunAt": None,
+                "intervalMinutes": 360,
             },
             "autonomousLoop": {
                 **(auto.status if auto else {
