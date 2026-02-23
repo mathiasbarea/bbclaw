@@ -81,6 +81,19 @@ CREATE TABLE IF NOT EXISTS objectives (
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS scheduled_items (
+    id          TEXT PRIMARY KEY,
+    item_type   TEXT NOT NULL DEFAULT 'task',
+    title       TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    schedule    TEXT NOT NULL,
+    next_run_at TEXT,
+    status      TEXT NOT NULL DEFAULT 'active',
+    last_run_at TEXT,
+    run_count   INTEGER DEFAULT 0,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
