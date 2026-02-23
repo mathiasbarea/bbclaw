@@ -91,6 +91,7 @@ class Orchestrator:
         self._improvement_loop: Any = None
         self._autonomous_loop: Any = None
         self._error_collector: Any = None
+        self._pending_reminders: list[dict] = []
 
     async def start(self) -> None:
         """Inicializa todos los subsistemas."""
@@ -282,6 +283,21 @@ class Orchestrator:
             metadata={"mode": "direct", "agent": agent.name, "success": result.success},
         )
 
+        # Task persistence (best-effort)
+        try:
+            import uuid as _uuid
+            await self.db.upsert_task(
+                task_id=f"direct-{_uuid.uuid4().hex[:8]}",
+                name=user_input[:100],
+                status="done" if result.success else "failed",
+                agent=agent.name,
+                input=user_input[:2000],
+                result=(result.output or "")[:5000] if result.success else None,
+                error=(result.error or "")[:2000] if not result.success else None,
+            )
+        except Exception:
+            pass
+
         if self.vectors and self.provider:
             try:
                 embedding = await self.provider.embed(f"{user_input}\n{response}")
@@ -324,7 +340,7 @@ class Orchestrator:
         memory_ctx = await self.context_builder.build(user_input)
 
         # Modo directo para tareas simples (bypasea planner + task_queue)
-        if intent == "user" and self._is_simple_task(user_input):
+        if self._is_simple_task(user_input):
             return await self.run_direct(user_input, memory_ctx=memory_ctx, intent=intent)
 
         # 2. Crear plan
@@ -418,3 +434,9 @@ class Orchestrator:
         if self.provider and hasattr(self.provider, "aclose"):
             await self.provider.aclose()
         logger.info("Sistema %s detenido.", SYSTEM_NAME)
+
+    def get_and_clear_reminders(self) -> list[dict]:
+        """Pop all pending reminders for display in REPL."""
+        reminders = self._pending_reminders[:]
+        self._pending_reminders.clear()
+        return reminders

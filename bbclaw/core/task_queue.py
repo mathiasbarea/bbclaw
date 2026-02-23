@@ -137,6 +137,22 @@ class TaskQueue:
             logger.error("Excepción en tarea '%s': %s", task.name, e)
             await bus.publish(Event("task.failed", agent_name, {"task_id": task.id, "error": str(e)}))
 
+        # Persist task to DB (best-effort)
+        try:
+            from ..memory.db import get_db
+            db = get_db()
+            await db.upsert_task(
+                task_id=task.id,
+                name=task.name,
+                status=task.status,
+                agent=agent_name,
+                input=task.description[:2000],
+                result=(task.result or "")[:5000] if task.status == "done" else None,
+                error=(task.error or "")[:2000] if task.status == "failed" else None,
+            )
+        except Exception:
+            pass
+
     def _build_dependency_context(self, task: TaskSpec, plan: Plan) -> str:
         """Construye contexto con resultados de las tareas de las que depende."""
         parts = []

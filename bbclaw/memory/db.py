@@ -142,6 +142,7 @@ class Database:
             "ALTER TABLE objectives ADD COLUMN priority INTEGER DEFAULT 3",
             "ALTER TABLE objectives ADD COLUMN progress TEXT DEFAULT ''",
             "ALTER TABLE objectives ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_next_run ON scheduled_items(next_run_at) WHERE status = 'active'",
         ]
         for sql in migrations:
             try:
@@ -362,3 +363,77 @@ class Database:
                 "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
                 (status, obj_id),
             )
+
+    # ── Scheduled Items ────────────────────────────────────────────────────────
+
+    async def create_scheduled_item(
+        self,
+        item_id: str,
+        item_type: str,
+        title: str,
+        description: str,
+        schedule: str,
+        next_run_at: str | None,
+    ) -> None:
+        await self.execute(
+            "INSERT INTO scheduled_items (id, item_type, title, description, schedule, next_run_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (item_id, item_type, title, description, schedule, next_run_at),
+        )
+
+    async def get_due_items(self, now_iso: str) -> list[dict]:
+        rows = await self.fetchall(
+            "SELECT * FROM scheduled_items WHERE status = 'active' AND next_run_at <= ? "
+            "ORDER BY next_run_at ASC",
+            (now_iso,),
+        )
+        for r in rows:
+            try:
+                r["schedule"] = json.loads(r["schedule"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return rows
+
+    async def get_scheduled_items(self, status: str | None = None) -> list[dict]:
+        if status:
+            rows = await self.fetchall(
+                "SELECT * FROM scheduled_items WHERE status = ? ORDER BY next_run_at ASC",
+                (status,),
+            )
+        else:
+            rows = await self.fetchall(
+                "SELECT * FROM scheduled_items ORDER BY next_run_at ASC"
+            )
+        for r in rows:
+            try:
+                r["schedule"] = json.loads(r["schedule"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return rows
+
+    async def get_scheduled_item(self, item_id: str) -> dict | None:
+        row = await self.fetchone(
+            "SELECT * FROM scheduled_items WHERE id = ?", (item_id,)
+        )
+        if row:
+            try:
+                row["schedule"] = json.loads(row["schedule"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return row
+
+    async def update_scheduled_item(self, item_id: str, **kwargs) -> None:
+        if not kwargs:
+            return
+        fields, vals = [], []
+        for k, v in kwargs.items():
+            fields.append(f"{k} = ?")
+            vals.append(v)
+        vals.append(item_id)
+        await self.execute(
+            f"UPDATE scheduled_items SET {', '.join(fields)} WHERE id = ?",
+            tuple(vals),
+        )
+
+    async def delete_scheduled_item(self, item_id: str) -> None:
+        await self.execute("DELETE FROM scheduled_items WHERE id = ?", (item_id,))
