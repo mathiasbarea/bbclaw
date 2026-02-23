@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import tomllib
 from pathlib import Path
@@ -26,6 +27,8 @@ from ..tools.registry import registry
 from ..identity import SYSTEM_NAME
 
 logger = logging.getLogger(__name__)
+
+_PROJECT_MENTION_RE = re.compile(r'(?:^|\s)#([a-z0-9][a-z0-9-]*)', re.IGNORECASE)
 
 
 def _load_config(config_path: str | Path = "config/default.toml") -> dict:
@@ -197,6 +200,38 @@ class Orchestrator:
             loaded_skills,
         )
 
+    async def _extract_and_switch_project(self, text: str) -> str:
+        """Si el texto contiene #proyecto, cambia al proyecto y retorna texto limpio."""
+        match = _PROJECT_MENTION_RE.search(text)
+        if not match:
+            return text
+
+        slug = match.group(1).lower()
+
+        if not self.db:
+            return text
+        project = await self.db.get_project_by_slug(slug)
+        if not project:
+            return text  # no existe → dejar el texto como está
+
+        # Switch: workspace + session
+        from ..tools.filesystem import set_workspace
+        set_workspace(project["workspace_path"])
+        await self.db.update_project_last_used(project["id"])
+
+        from ..tools.projects import _current_session
+        if _current_session is not None:
+            _current_session.active_project_id = project["id"]
+
+        logger.info("Auto-switch a proyecto '%s' (slug: %s)", project["name"], slug)
+
+        # Limpiar #mención del texto
+        start = match.start()
+        if start < len(text) and text[start] == ' ':
+            start += 1
+        cleaned = (text[:start] + text[match.end():]).strip()
+        return cleaned or text  # si queda vacío, devolver original
+
     async def run(self, user_input: str, intent: str = "user") -> str:
         """
         Pipeline completo:
@@ -217,6 +252,10 @@ class Orchestrator:
                 await asyncio.sleep(1)
                 if not self._improvement_running:
                     break
+
+        # Auto-switch proyecto si hay #mención
+        if intent == "user":
+            user_input = await self._extract_and_switch_project(user_input)
 
         # 1. Contexto de memoria
         memory_ctx = await self.context_builder.build(user_input)

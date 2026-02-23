@@ -136,6 +136,7 @@ export interface AgentStatusItem {
 export interface ProjectOverviewItem {
     id: string;
     name: string;
+    slug: string;
     status: string;
     taskCounts: StatusCounts;
 }

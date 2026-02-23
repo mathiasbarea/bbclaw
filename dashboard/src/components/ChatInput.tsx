@@ -141,7 +141,7 @@ export function ChatInput({
 }: {
     onSendMessage: (msg: string, sessionId?: string) => Promise<SendMessageResult>;
     agents?: { name: string; role: string }[];
-    projects?: { name: string }[];
+    projects?: { name: string; slug: string }[];
     requestCompletions?: RequestCompletionMessage[];
     apiBaseUrl?: string;
 }) {
@@ -175,7 +175,10 @@ export function ChatInput({
     const filteredItems = mentionType === 'agent'
         ? agents.filter(a => a.name.toLowerCase().includes(mentionQuery.toLowerCase()))
         : mentionType === 'project'
-            ? projects.filter(p => p.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+            ? projects.filter(p =>
+                p.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+                p.slug.toLowerCase().includes(mentionQuery.toLowerCase())
+              )
             : [];
 
     const updateMentionStateFromValue = useCallback((val: string) => {
@@ -485,7 +488,10 @@ export function ChatInput({
                 setSelectedIndex(s => (s - 1 + filteredItems.length) % filteredItems.length);
             } else if (e.key === 'Enter' || e.key === 'Tab') {
                 e.preventDefault();
-                const selected = filteredItems[selectedIndex].name;
+                const selectedItem = filteredItems[selectedIndex];
+                const selected = mentionType === 'project'
+                    ? (selectedItem as { slug: string }).slug
+                    : selectedItem.name;
                 const bef = input.slice(0, mentionIndex);
                 const aft = input.slice(mentionIndex + 1 + mentionQuery.length);
                 const prefix = mentionType === 'agent' ? '@' : '#';
@@ -769,7 +775,10 @@ export function ChatInput({
                                                         const bef = input.slice(0, mentionIndex);
                                                         const aft = input.slice(mentionIndex + 1 + mentionQuery.length);
                                                         const prefix = mentionType === 'agent' ? '@' : '#';
-                                                        setInput(bef + prefix + item.name + ' ' + aft);
+                                                        const insertValue = mentionType === 'project'
+                                                            ? (item as { slug: string }).slug
+                                                            : item.name;
+                                                        setInput(bef + prefix + insertValue + ' ' + aft);
                                                         setMentionIndex(-1);
                                                         setMentionType(null);
                                                         if (inputRef.current) inputRef.current.focus();
@@ -779,6 +788,7 @@ export function ChatInput({
                                                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                                                         <span style={{ fontSize: '1rem', fontWeight: 500, color: '#fff', fontFamily: 'Outfit, sans-serif' }}>{item.name}</span>
                                                         {mentionType === 'agent' && <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>{(item as any).role}</span>}
+                                                        {mentionType === 'project' && <span style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>#{(item as any).slug}</span>}
                                                     </div>
                                                 </div>
                                             ))}

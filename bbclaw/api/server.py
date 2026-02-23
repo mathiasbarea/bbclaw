@@ -387,6 +387,7 @@ def create_app(orchestrator) -> Any:
             items.append({
                 "id": p.get("id", ""),
                 "name": p.get("name", ""),
+                "slug": p.get("slug", ""),
                 "status": "active",
                 "taskCounts": {"pending": 0, "running": 0, "blocked": 0, "completed": 0, "failed": 0, "canceled": 0},
             })
