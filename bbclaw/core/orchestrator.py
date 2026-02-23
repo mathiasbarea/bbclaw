@@ -87,6 +87,7 @@ class Orchestrator:
         self._last_user_activity: float = time.time()
         self._improvement_loop: Any = None
         self._autonomous_loop: Any = None
+        self._error_collector: Any = None
 
     async def start(self) -> None:
         """Inicializa todos los subsistemas."""
@@ -166,6 +167,11 @@ class Orchestrator:
                     port=api_cfg.get("port", 8765),
                 )
             )
+
+        # ── ErrorCollector: captura errores de bbclaw.* en memoria ───────────
+        from .error_collector import ErrorCollector
+        self._error_collector = ErrorCollector()
+        logging.getLogger("bbclaw").addHandler(self._error_collector)
 
         # ── Auto-commit + Background loops ────────────────────────────────────
         from ..tools.registry import enable_auto_commit
@@ -295,6 +301,9 @@ class Orchestrator:
             await self._improvement_loop.stop()
         if self._autonomous_loop:
             await self._autonomous_loop.stop()
+        if self._error_collector:
+            logging.getLogger("bbclaw").removeHandler(self._error_collector)
+            self._error_collector = None
         await bus.stop()
         if self.db:
             await self.db.close()

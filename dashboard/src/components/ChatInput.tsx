@@ -731,7 +731,7 @@ export function ChatInput({
                                     value={input}
                                     onChange={handleChange}
                                     onKeyDown={handleInputKeyDown}
-                                    placeholder="Ask the orchestrator, mention @agent or #project..."
+                                    placeholder="Ask the orchestrator, mention #project..."
                                     disabled={isSending}
                                     style={{ width: '100%' }}
                                 />
@@ -792,7 +792,7 @@ export function ChatInput({
                             </form>
 
                             <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', padding: '0 6px' }}>
-                                Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>@</strong> agent mention, <strong>#</strong> project mention.
+                                Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>#</strong> project mention.
                             </div>
 
                             {pendingRequests.length > 0 && (

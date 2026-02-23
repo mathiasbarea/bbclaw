@@ -95,11 +95,15 @@ class ImprovementLoop:
             if tokens >= budget:
                 return False
 
-        # Check: inactividad del usuario
-        idle_minutes = cfg.get("idle_minutes_before_run", 10)
-        elapsed = (time.time() - self.orch._last_user_activity) / 60.0
-        if elapsed < idle_minutes:
-            return False
+        # ERROR MODE: errores activos bypasean idle check
+        if self._has_actionable_errors():
+            logger.info("Error mode: errores activos detectados, bypaseando idle check")
+        else:
+            # Check: inactividad del usuario
+            idle_minutes = cfg.get("idle_minutes_before_run", 10)
+            elapsed = (time.time() - self.orch._last_user_activity) / 60.0
+            if elapsed < idle_minutes:
+                return False
 
         # Check: no estar en branch improve/*
         try:
@@ -134,6 +138,10 @@ class ImprovementLoop:
                 pass
         return count
 
+    def _has_actionable_errors(self) -> bool:
+        collector = getattr(self.orch, '_error_collector', None)
+        return collector is not None and collector.has_actionable_errors()
+
     async def _run_cycle(self) -> None:
         self._cycle_count += 1
         cycle = self._cycle_count
@@ -149,11 +157,24 @@ class ImprovementLoop:
             await self._git_exec("git", "checkout", "-b", branch)
 
             # 2. Construir contexto y correr agente
-            prompt = (
-                "Sos el auto-improver del sistema. Analizá el código fuente en bbclaw/, "
-                "identificá una mejora concreta (bug fix, optimización, feature pequeño), "
-                "implementala y verificá que funciona. Hacé cambios pequeños y seguros."
-            )
+            collector = getattr(self.orch, '_error_collector', None)
+            error_context = ""
+            if collector and collector.has_actionable_errors():
+                error_context = collector.format_for_prompt()
+
+            if error_context:
+                prompt = (
+                    "MODO FIX: Se detectaron errores en el sistema que necesitan corrección urgente.\n\n"
+                    f"{error_context}\n\n"
+                    "Diagnosticá la causa raíz de cada error y corregí el código fuente. "
+                    "Priorizá fixes que eviten que el error se repita. Hacé cambios mínimos y seguros."
+                )
+            else:
+                prompt = (
+                    "Sos el auto-improver del sistema. Analizá el código fuente en bbclaw/, "
+                    "identificá una mejora concreta (bug fix, optimización, feature pequeño), "
+                    "implementala y verificá que funciona. Hacé cambios pequeños y seguros."
+                )
             try:
                 result = await asyncio.wait_for(
                     self.orch.run(prompt, intent="improvement"),
@@ -184,6 +205,10 @@ class ImprovementLoop:
                 await self._git_exec("git", "merge", branch, "--no-edit")
                 merged = True
                 logger.info("Cycle %d merged: %s", cycle, changed_files)
+                # Post-merge: marcar errores como resueltos si estábamos en error mode
+                if error_context and collector:
+                    collector.mark_all_resolved()
+                    logger.info("Cycle %d: errores marcados como resueltos post-merge", cycle)
             else:
                 self._consecutive_no_improvement += 1
                 logger.info("Cycle %d: sin cambios", cycle)

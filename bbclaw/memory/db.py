@@ -113,8 +113,28 @@ class Database:
         self._conn = await aiosqlite.connect(self.db_path)
         self._conn.row_factory = aiosqlite.Row
         await self._conn.executescript(SCHEMA)
+        await self._run_migrations()
         await self._conn.commit()
         logger.info("Base de datos conectada: %s", self.db_path)
+
+    async def _run_migrations(self) -> None:
+        """Agrega columnas faltantes a tablas que ya existían. Idempotente."""
+        migrations = [
+            "ALTER TABLE improvement_attempts ADD COLUMN tokens_used INTEGER DEFAULT 0",
+            "ALTER TABLE improvement_attempts ADD COLUMN score_before REAL",
+            "ALTER TABLE improvement_attempts ADD COLUMN score_after REAL",
+            "ALTER TABLE improvement_attempts ADD COLUMN merged INTEGER DEFAULT 0",
+            "ALTER TABLE improvement_attempts ADD COLUMN error TEXT",
+            "ALTER TABLE improvement_attempts ADD COLUMN changed_files TEXT DEFAULT '[]'",
+            "ALTER TABLE objectives ADD COLUMN priority INTEGER DEFAULT 3",
+            "ALTER TABLE objectives ADD COLUMN progress TEXT DEFAULT ''",
+            "ALTER TABLE objectives ADD COLUMN updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))",
+        ]
+        for sql in migrations:
+            try:
+                await self._conn.execute(sql)
+            except Exception:
+                pass  # columna ya existe o tabla no existe aún — OK
 
     async def close(self) -> None:
         if self._conn:
