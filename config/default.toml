@@ -49,10 +49,11 @@ level = "INFO"
 
 [improvement]
 enabled = true
-interval_minutes = 10
-max_cycles_per_hour = 3
+interval_minutes = 360
+max_cycles_per_hour = 1
 token_budget_per_hour = 80000
-idle_minutes_before_run = 10
+idle_minutes_before_run = 5
+consecutive_no_improvement_threshold = 20
 
 [autonomous]
 enabled = true

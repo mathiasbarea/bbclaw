@@ -30,7 +30,38 @@ class ImprovementLoop:
         self._last_score_delta: float | None = None
         self._consecutive_no_improvement = 0
 
+    async def _load_persisted_state(self) -> None:
+        """Restore counters from DB so they survive restarts."""
+        if not self.orch.db:
+            return
+        try:
+            state = await self.orch.db.get_knowledge("improvement_loop_state")
+            if state and isinstance(state, dict):
+                self._consecutive_no_improvement = state.get("consecutive_no_improvement", 0)
+                self._cycle_count = state.get("cycle_count", 0)
+                self._last_run_at = state.get("last_run_at")
+                logger.info(
+                    "Improvement state restored: cycles=%d, no_improvement=%d, last_run=%s",
+                    self._cycle_count, self._consecutive_no_improvement, self._last_run_at,
+                )
+        except Exception as e:
+            logger.warning("Could not load improvement state: %s", e)
+
+    async def _save_persisted_state(self) -> None:
+        """Persist counters to DB."""
+        if not self.orch.db:
+            return
+        try:
+            await self.orch.db.set_knowledge("improvement_loop_state", {
+                "consecutive_no_improvement": self._consecutive_no_improvement,
+                "cycle_count": self._cycle_count,
+                "last_run_at": self._last_run_at,
+            })
+        except Exception:
+            pass
+
     async def start(self) -> None:
+        await self._load_persisted_state()
         self._task = asyncio.create_task(self._loop())
         logger.info("Improvement loop iniciado")
 
@@ -83,8 +114,19 @@ class ImprovementLoop:
         if not cfg.get("enabled", True):
             return False
 
-        # Check: no exceder max cycles por hora
-        max_cycles = cfg.get("max_cycles_per_hour", 3)
+        # Check: interval since last cycle (primary gate)
+        interval_minutes = cfg.get("interval_minutes", 360)
+        if self._last_run_at:
+            try:
+                last = datetime.fromisoformat(self._last_run_at.replace("Z", "+00:00"))
+                elapsed_min = (datetime.now(timezone.utc) - last).total_seconds() / 60.0
+                if elapsed_min < interval_minutes:
+                    return False
+            except Exception:
+                pass
+
+        # Check: no exceder max cycles por hora (safety cap)
+        max_cycles = cfg.get("max_cycles_per_hour", 1)
         if await self._cycles_this_hour() >= max_cycles:
             return False
 
@@ -99,8 +141,8 @@ class ImprovementLoop:
         if self._has_actionable_errors():
             logger.info("Error mode: errores activos detectados, bypaseando idle check")
         else:
-            # Check: inactividad del usuario
-            idle_minutes = cfg.get("idle_minutes_before_run", 10)
+            # Check: inactividad del usuario (mínima, para no interrumpir)
+            idle_minutes = cfg.get("idle_minutes_before_run", 5)
             elapsed = (time.time() - self.orch._last_user_activity) / 60.0
             if elapsed < idle_minutes:
                 return False
