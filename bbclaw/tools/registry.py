@@ -10,6 +10,7 @@ import asyncio
 import inspect
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Awaitable
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ _TOOL_VERBS: dict[str, str] = {
     "make_dir": "create dir",
 }
 
+_READ_TOOLS_WITH_PATH = {"read_file", "read_source"}
+
 
 async def _auto_commit(tool_name: str, kwargs: dict) -> None:
     path_arg = str(kwargs.get("path", kwargs.get("directory", "")))
@@ -51,6 +54,35 @@ async def _auto_commit(tool_name: str, kwargs: dict) -> None:
         await asyncio.wait_for(proc.wait(), timeout=10)
     except Exception:
         pass  # silencioso — no bloquear al agente
+
+
+def _normalize_tool_path(path_arg: Any) -> str:
+    raw = "" if path_arg is None else str(path_arg)
+    stripped = raw.strip()
+    if stripped in {"", ".", "./", ".\\"}:
+        return "."
+    return str(Path(stripped))
+
+
+def _build_actionable_path_error(tool_name: str, kwargs: dict, error: Exception) -> str:
+    original = kwargs.get("path")
+    normalized = _normalize_tool_path(original)
+    msg = str(error)
+
+    hints: list[str] = []
+    if normalized == ".":
+        hints.append("el path parece vacío o apunta al directorio actual")
+    if any(seg in normalized for seg in ("..", "~")):
+        hints.append("evitá usar '..' o '~'; pasá una ruta relativa al workspace")
+
+    if "Archivo no encontrado" in msg or "No such file" in msg or "not found" in msg.lower():
+        base = f"{msg}. Path recibido='{original}', normalizado='{normalized}'."
+        suggestion = "Sugerencia: usá list_files/check_path antes de read_file/read_source para confirmar la ruta exacta."
+        if hints:
+            return f"{base} Posible causa: {'; '.join(hints)}. {suggestion}"
+        return f"{base} {suggestion}"
+
+    return msg
 
 
 @dataclass
@@ -108,13 +140,17 @@ class ToolRegistry:
         if tool_name not in self._tools:
             return ToolResult(success=False, output=None, error=f"Herramienta '{tool_name}' no encontrada")
 
+        if tool_name in _READ_TOOLS_WITH_PATH and "path" in kwargs:
+            kwargs = {**kwargs, "path": _normalize_tool_path(kwargs.get("path"))}
+
         tool = self._tools[tool_name]
         try:
             result = await tool.func(**kwargs)
             tr = ToolResult(success=True, output=result)
         except Exception as e:
             logger.error("Error al ejecutar tool '%s': %s", tool_name, e)
-            return ToolResult(success=False, output=None, error=str(e))
+            error_msg = _build_actionable_path_error(tool_name, kwargs, e) if tool_name in _READ_TOOLS_WITH_PATH else str(e)
+            return ToolResult(success=False, output=None, error=error_msg)
 
         if tr.success and _auto_commit_enabled and tool_name in _MUTATING_TOOLS:
             await _auto_commit(tool_name, kwargs)
