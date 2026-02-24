@@ -1180,7 +1180,7 @@ function App() {
           {/* Autonomous Loop */}
           <div style={{background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-card)", borderRadius: "8px", padding: "0.6rem 0.75rem"}}>
             <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Autonomous</span>
+              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Autonomous Loop</span>
               <span className={`status-chip ${improvementStatus?.autonomousLoop.isRunning ? "status-running" : "status-idle"}`} style={{fontSize: "0.6rem", padding: "1px 6px"}}>
                 {improvementStatus?.autonomousLoop.isRunning ? "Active" : "Idle"}
               </span>
@@ -1198,7 +1198,7 @@ function App() {
           {/* Improvement Loop */}
           <div style={{background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-card)", borderRadius: "8px", padding: "0.6rem 0.75rem"}}>
             <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Improvement</span>
+              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Self Improvement</span>
               <span className={`status-chip ${improvementStatus?.improvementLoop.isRunning ? "status-running" : "status-idle"}`} style={{fontSize: "0.6rem", padding: "1px 6px"}}>
                 {improvementStatus?.improvementLoop.isRunning ? "Running" : "Idle"}
               </span>

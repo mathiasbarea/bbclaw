@@ -108,6 +108,22 @@ class TaskQueue:
         await bus.publish(Event("task.started", agent_name, {"task_id": task.id, "name": task.name}))
         logger.info("Iniciando tarea '%s' con agente '%s'", task.name, agent_name)
 
+        # Persist "running" status to DB immediately so the dashboard can see it
+        try:
+            from ..memory.db import get_db
+            db_early = get_db()
+            await db_early.upsert_task(
+                task_id=task.id,
+                name=task.name,
+                status="running",
+                agent=agent_name,
+                input=task.description[:2000],
+                created_by=self._created_by,
+                project_id=self._project_id,
+            )
+        except Exception:
+            pass
+
         # Enriquecer la descripción con resultados de dependencias
         dep_context = self._build_dependency_context(task, plan)
 
