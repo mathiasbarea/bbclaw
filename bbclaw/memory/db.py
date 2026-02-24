@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS scheduled_items (
     run_count   INTEGER DEFAULT 0,
     created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS artifacts (
+    id          TEXT PRIMARY KEY,
+    project_id  TEXT NOT NULL DEFAULT '',
+    title       TEXT NOT NULL,
+    artifact_type TEXT NOT NULL DEFAULT 'general',
+    content     TEXT NOT NULL DEFAULT '',
+    tags        TEXT DEFAULT '[]',
+    version     INTEGER DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -504,3 +516,56 @@ class Database:
 
     async def delete_scheduled_item(self, item_id: str) -> None:
         await self.execute("DELETE FROM scheduled_items WHERE id = ?", (item_id,))
+
+    # ── Artifacts ──────────────────────────────────────────────────────────────
+
+    async def create_artifact(
+        self,
+        artifact_id: str,
+        project_id: str,
+        title: str,
+        artifact_type: str = "general",
+        content: str = "",
+        tags: list[str] | None = None,
+    ) -> None:
+        await self.execute(
+            "INSERT INTO artifacts (id, project_id, title, artifact_type, content, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (artifact_id, project_id, title, artifact_type, content, json.dumps(tags or [])),
+        )
+
+    async def get_artifact(self, artifact_id: str) -> dict | None:
+        return await self.fetchone(
+            "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+        )
+
+    async def get_artifact_by_title(self, title: str, project_id: str) -> dict | None:
+        return await self.fetchone(
+            "SELECT * FROM artifacts WHERE title = ? AND project_id = ?",
+            (title, project_id),
+        )
+
+    async def get_artifacts_by_project(self, project_id: str) -> list[dict]:
+        return await self.fetchall(
+            "SELECT * FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC",
+            (project_id,),
+        )
+
+    async def get_artifact_summaries(self, project_id: str) -> list[dict]:
+        return await self.fetchall(
+            "SELECT id, title, artifact_type, tags, version, updated_at "
+            "FROM artifacts WHERE project_id = ? ORDER BY updated_at DESC",
+            (project_id,),
+        )
+
+    async def update_artifact_content(
+        self, artifact_id: str, content: str, version: int
+    ) -> None:
+        await self.execute(
+            "UPDATE artifacts SET content = ?, version = ?, "
+            "updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?",
+            (content, version, artifact_id),
+        )
+
+    async def delete_artifact(self, artifact_id: str) -> None:
+        await self.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))

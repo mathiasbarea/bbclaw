@@ -118,6 +118,30 @@ export interface TaskDetailItem extends TaskSummaryItem {
     runHistory: TaskRunDetailItem[];
 }
 
+export interface ArtifactItem {
+  id: string;
+  title: string;
+  type: string;
+  projectId: string;
+  tags: string[];
+  version: number;
+  itemCount: number;
+  updatedAt: number;
+  contentPreview: string;
+}
+
+export interface ArtifactDetailItem {
+  id: string;
+  title: string;
+  type: string;
+  projectId: string;
+  tags: string[];
+  version: number;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface AgentStatusItem {
     id: string;
     name: string;

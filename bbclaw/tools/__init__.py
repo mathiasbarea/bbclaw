@@ -3,6 +3,7 @@ from . import filesystem  # noqa: F401 – registra herramientas de filesystem
 from . import terminal    # noqa: F401 – registra herramienta run_command
 from . import self_improve  # noqa: F401 – registra herramientas de auto-mejora
 from . import projects  # noqa: F401 – registra herramientas de gestión de proyectos
+from . import artifacts  # noqa: F401 – registra herramientas de artifacts
 
 # Importar módulos opcionales (pueden existir según la versión del sistema)
 def _try_import(name: str) -> None:

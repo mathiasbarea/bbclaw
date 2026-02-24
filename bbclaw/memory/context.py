@@ -5,6 +5,7 @@ Combina historial de conversaciones + memoria semántica.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -77,5 +78,31 @@ class ContextBuilder:
         if knowledge:
             k_lines = [f"- **{k}**: {v}" for k, v in list(knowledge.items())[:10]]
             parts.append("## Conocimiento acumulado\n" + "\n".join(k_lines))
+
+        # 4. Artifacts del proyecto activo
+        try:
+            from ..tools.projects import get_current_session
+            session = get_current_session()
+            project_id = getattr(session, "active_project_id", None) or ""
+            if project_id:
+                summaries = await self.db.get_artifact_summaries(project_id)
+                if summaries:
+                    lines = ["## Artifacts existentes en este proyecto"]
+                    for a in summaries[:10]:
+                        tags_raw = a.get("tags", "[]")
+                        tags = json.loads(tags_raw) if isinstance(tags_raw, str) else (tags_raw or [])
+                        tags_str = ", ".join(tags)
+                        lines.append(
+                            f"- **{a['title']}** ({a['artifact_type']}, v{a['version']}, "
+                            f"actualizado: {a['updated_at'][:10]})"
+                            + (f" [{tags_str}]" if tags_str else "")
+                        )
+                    lines.append(
+                        "\nUsá `get_artifact(title)` para leer el contenido completo "
+                        "y `save_artifact(...)` para crear o actualizar artifacts."
+                    )
+                    parts.append("\n".join(lines))
+        except Exception as e:
+            logger.warning("Error al inyectar artifacts en contexto: %s", e)
 
         return "\n\n".join(parts) if parts else ""

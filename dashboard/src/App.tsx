@@ -22,6 +22,8 @@ import type {
   OrchestratorMetricsDashboard,
   ObjectiveSummaryItem,
   ObjectiveDetailItem,
+  ArtifactItem,
+  ArtifactDetailItem,
 } from './types';
 
 interface SendMessageResult {
@@ -377,6 +379,9 @@ function App() {
   const [pendingConfirmAction, setPendingConfirmAction] = useState<PendingConfirmAction | null>(null);
   const [activeProject, setActiveProject] = useState<{ id: string | null; name: string | null; slug: string | null; objective?: string }>({ id: null, name: null, slug: null });
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [artifacts, setArtifacts] = useState<ArtifactItem[]>([]);
+  const [isArtifactDetailOpen, setIsArtifactDetailOpen] = useState(false);
+  const [selectedArtifactDetail, setSelectedArtifactDetail] = useState<ArtifactDetailItem | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [pulseTrigger, setPulseTrigger] = useState(0);
   const lastPulse = useRef(0);
@@ -395,7 +400,7 @@ function App() {
 
     const run = (async () => {
       try {
-        const [m, business, objective, orchestrator, objectiveList, improvementStatusData, runTasks, upcoming, proj, activeProj] = await Promise.all([
+        const [m, business, objective, orchestrator, objectiveList, improvementStatusData, runTasks, upcoming, proj, activeProj, artifactsList] = await Promise.all([
           fetch(`${dsUrl}/api/metrics`).then((r) => r.json()),
           fetch(`${dsUrl}/api/metrics/business?hours=24&focus_limit=10`).then((r) => r.json()),
           fetch(`${dsUrl}/api/objectives/overview?hours=24&limit=10`).then((r) => r.json()),
@@ -406,6 +411,7 @@ function App() {
           fetch(`${dsUrl}/api/tasks/upcoming?awaiting_limit=120&scheduled_limit=120`).then((r) => r.json()),
           fetch(`${dsUrl}/api/projects`).then((r) => r.json()),
           fetch(`${dsUrl}/api/active-project`).then((r) => r.json()).catch(() => ({ id: null, name: null, slug: null })),
+          fetch(`${dsUrl}/api/artifacts`).then((r) => r.json()).catch(() => []),
         ]);
         setMetrics(m && typeof m === 'object' && !m.detail ? m : null);
         setBusinessMetrics(business && typeof business === 'object' && !business.detail ? business : null);
@@ -433,6 +439,7 @@ function App() {
           scheduled: Array.isArray(upcoming?.scheduled) ? upcoming.scheduled : [],
         });
         setProjects(projList);
+        setArtifacts(Array.isArray(artifactsList) ? artifactsList : []);
         if (activeProj && typeof activeProj === 'object') {
           setActiveProject(activeProj);
         }
@@ -491,17 +498,18 @@ function App() {
   // (selectedAgentId guard removed: no agent list in bbclaw mode)
 
   useEffect(() => {
-    if (!isTaskDetailOpen && !isTemplateDetailOpen) return;
+    if (!isTaskDetailOpen && !isTemplateDetailOpen && !isArtifactDetailOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         setIsTaskDetailOpen(false);
         setIsTemplateDetailOpen(false);
+        setIsArtifactDetailOpen(false);
         setPendingConfirmAction(null);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isTaskDetailOpen, isTemplateDetailOpen]);
+  }, [isTaskDetailOpen, isTemplateDetailOpen, isArtifactDetailOpen]);
 
   // SSE + resilience polling + stream health-check.
   useEffect(() => {
@@ -680,6 +688,31 @@ function App() {
   }, [upcomingTasks.scheduled, selectedProjectId]);
 
   const visibleUpcomingCount = visibleAwaitingNow.length + visibleScheduledTasks.length;
+
+  const visibleArtifacts = useMemo(() => {
+    if (selectedProjectId) {
+      return artifacts.filter((a) => a.projectId === selectedProjectId);
+    }
+    return artifacts;
+  }, [artifacts, selectedProjectId]);
+
+  const openArtifactDetail = useCallback(async (artifactId: string) => {
+    setIsArtifactDetailOpen(true);
+    setSelectedArtifactDetail(null);
+    try {
+      const res = await fetch(`${dsUrl}/api/artifacts/${artifactId}`);
+      if (!res.ok) throw new Error('Not found');
+      const data = await res.json();
+      setSelectedArtifactDetail(data);
+    } catch {
+      setSelectedArtifactDetail(null);
+    }
+  }, [dsUrl]);
+
+  const closeArtifactDetail = useCallback(() => {
+    setIsArtifactDetailOpen(false);
+    setSelectedArtifactDetail(null);
+  }, []);
 
   const runningTasksCount = metrics?.tasks?.running ?? 0;
   const visibleCompletedTasksCount = selectedProjectId
@@ -1237,7 +1270,7 @@ function App() {
 
 
       {/* Main Grid: 3 Columns */}
-      <div style={{ flex: 1, marginTop: 'var(--live-dashboard-offset)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2rem', overflow: 'hidden', zIndex: 10 }}>
+      <div style={{ flex: 1, marginTop: 'var(--live-dashboard-offset)', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '2rem', overflow: 'hidden', zIndex: 10 }}>
 
         {/* Col 1: Projects */}
         <div className="glass-panel column-panel column-agents" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
@@ -1326,7 +1359,76 @@ function App() {
           </div>
         </div>
 
-        {/* Col 3: Upcoming Tasks */}
+        {/* Col 3: Artifacts */}
+        <div className="glass-panel column-panel column-artifacts" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
+          <h2 className="column-header">
+            <span>Artifacts</span>
+            <span className="column-subtitle"><AnimatedNumber value={visibleArtifacts.length} /> Total</span>
+          </h2>
+          <div className="task-list" style={{ gap: '0.35rem' }}>
+            <AnimatePresence initial={false} mode="popLayout">
+              {visibleArtifacts.map((a) => (
+                <motion.div
+                  key={a.id}
+                  layout="position"
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={taskItemMotionTransition}
+                >
+                  <SpotlightCard
+                    className="task-card is-clickable"
+                    activeColor="rgba(139, 92, 246, 0.12)"
+                    onClick={() => void openArtifactDetail(a.id)}
+                    includeBaseClass={false}
+                  >
+                    <div style={{ padding: '0.7rem 0.75rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>{a.title}</span>
+                        <span style={{
+                          fontSize: '0.65rem',
+                          padding: '2px 7px',
+                          borderRadius: '8px',
+                          background: 'rgba(139, 92, 246, 0.15)',
+                          color: 'rgba(139, 92, 246, 0.9)',
+                          fontWeight: 600,
+                        }}>
+                          {a.type}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                          v{a.version} &middot; {a.itemCount} run{a.itemCount !== 1 ? 's' : ''}
+                        </span>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                          {formatRelativeAge(Math.floor(a.updatedAt / 1000), clockNow)}
+                        </span>
+                      </div>
+                      {a.tags.length > 0 && (
+                        <div style={{ display: 'flex', gap: '0.3rem', marginTop: '0.3rem', flexWrap: 'wrap' }}>
+                          {a.tags.slice(0, 3).map((tag) => (
+                            <span key={tag} style={{
+                              fontSize: '0.6rem',
+                              padding: '1px 6px',
+                              borderRadius: '6px',
+                              background: 'rgba(99, 102, 241, 0.1)',
+                              color: 'var(--text-secondary)',
+                            }}>
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </SpotlightCard>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            <p className={`task-empty-message ${visibleArtifacts.length === 0 ? 'visible' : 'hidden'}`}>No artifacts yet.</p>
+          </div>
+        </div>
+
+        {/* Col 4: Upcoming Tasks */}
         <div className="glass-panel column-panel column-awaiting" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
           <h2 className="column-header">
             <span>Upcoming Tasks</span>
@@ -1866,6 +1968,57 @@ function App() {
                   {isConfirmActionBusy ? 'Working...' : confirmActionDialog.confirmLabel}
                 </button>
               </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isArtifactDetailOpen ? (
+          <motion.div
+            className="task-detail-backdrop"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={closeArtifactDetail}
+          >
+            <motion.div
+              className="task-detail-modal glass-panel"
+              initial={{ opacity: 0, y: 14, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 10, scale: 0.98 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="task-detail-header">
+                <div>
+                  <h3 className="task-detail-title">{selectedArtifactDetail?.title || 'Artifact detail'}</h3>
+                  <p className="task-detail-subtitle">
+                    {selectedArtifactDetail ? `${selectedArtifactDetail.type} · v${selectedArtifactDetail.version}` : 'Loading...'}
+                    {selectedArtifactDetail?.tags?.length ? ` · ${selectedArtifactDetail.tags.join(', ')}` : ''}
+                  </p>
+                </div>
+                <button type="button" className="task-detail-close" onClick={closeArtifactDetail}>
+                  Close
+                </button>
+              </div>
+              {selectedArtifactDetail ? (
+                <div className="task-detail-body" style={{ padding: '1rem 1.5rem', overflow: 'auto', flex: 1 }}>
+                  <pre style={{
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontSize: '0.8rem',
+                    lineHeight: 1.6,
+                    color: 'var(--text-primary)',
+                    fontFamily: 'inherit',
+                    margin: 0,
+                  }}>
+                    {selectedArtifactDetail.content}
+                  </pre>
+                </div>
+              ) : (
+                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>Loading...</div>
+              )}
             </motion.div>
           </motion.div>
         ) : null}

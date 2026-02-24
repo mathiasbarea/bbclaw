@@ -20,6 +20,9 @@ Rutas:
   PATCH /api/task-templates/{id}
   POST /api/task-templates/{id}/cancel-next
   POST /api/task-templates/{id}/deactivate
+  GET  /api/artifacts
+  GET  /api/artifacts/{id}
+  POST /api/artifacts/{id}/delete
   POST /api/prompt
   GET  /api/chat/history
   GET  /api/active-project
@@ -517,6 +520,71 @@ def create_app(orchestrator) -> Any:
     @api.post("/task-templates/{template_id}/deactivate")
     async def template_deactivate(template_id: str):
         raise HTTPException(status_code=404, detail="Templates no disponibles en esta versión")
+
+    # ── Artifacts ──────────────────────────────────────────────────────────────
+
+    @api.get("/artifacts")
+    async def artifacts_list(project_id: str = ""):
+        db = _db()
+        if project_id:
+            rows = await db.get_artifacts_by_project(project_id)
+        else:
+            rows = await db.fetchall(
+                "SELECT * FROM artifacts ORDER BY updated_at DESC LIMIT 50"
+            )
+        items = []
+        for a in rows:
+            content = a.get("content", "")
+            item_count = content.count("### Run ")
+            tags_raw = a.get("tags", "[]")
+            try:
+                tags = json.loads(tags_raw) if isinstance(tags_raw, str) else (tags_raw or [])
+            except (json.JSONDecodeError, TypeError):
+                tags = []
+            items.append({
+                "id": a["id"],
+                "title": a["title"],
+                "type": a.get("artifact_type", "general"),
+                "projectId": a.get("project_id", ""),
+                "tags": tags,
+                "version": a.get("version", 1),
+                "itemCount": item_count,
+                "updatedAt": _iso_to_epoch(a.get("updated_at", "")),
+                "contentPreview": content[:200],
+            })
+        return items
+
+    @api.get("/artifacts/{artifact_id}")
+    async def artifact_detail(artifact_id: str):
+        db = _db()
+        a = await db.get_artifact(artifact_id)
+        if not a:
+            raise HTTPException(status_code=404, detail="Artifact no encontrado")
+        tags_raw = a.get("tags", "[]")
+        try:
+            tags = json.loads(tags_raw) if isinstance(tags_raw, str) else (tags_raw or [])
+        except (json.JSONDecodeError, TypeError):
+            tags = []
+        return {
+            "id": a["id"],
+            "title": a["title"],
+            "type": a.get("artifact_type", "general"),
+            "projectId": a.get("project_id", ""),
+            "tags": tags,
+            "version": a.get("version", 1),
+            "content": a.get("content", ""),
+            "createdAt": _iso_to_epoch(a.get("created_at", "")),
+            "updatedAt": _iso_to_epoch(a.get("updated_at", "")),
+        }
+
+    @api.post("/artifacts/{artifact_id}/delete")
+    async def artifact_delete(artifact_id: str):
+        db = _db()
+        a = await db.get_artifact(artifact_id)
+        if not a:
+            raise HTTPException(status_code=404, detail="Artifact no encontrado")
+        await db.delete_artifact(artifact_id)
+        return {"ok": True, "message": f"Artifact '{a['title']}' eliminado"}
 
     # ── Prompt ────────────────────────────────────────────────────────────────
 

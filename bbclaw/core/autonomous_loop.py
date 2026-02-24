@@ -115,6 +115,27 @@ class AutonomousLoop:
             except Exception:
                 pass
 
+        # Inyectar artifacts existentes del proyecto
+        if self.orch.db:
+            try:
+                import json as _json
+                summaries = await self.orch.db.get_artifact_summaries(proj["id"])
+                if summaries:
+                    lines.append("\n--- Artifacts existentes ---")
+                    for a in summaries[:10]:
+                        tags_raw = a.get("tags", "[]")
+                        tags = _json.loads(tags_raw) if isinstance(tags_raw, str) else (tags_raw or [])
+                        tags_str = f" [{', '.join(tags)}]" if tags else ""
+                        lines.append(
+                            f"• {a['title']} ({a['artifact_type']}, v{a['version']}){tags_str}"
+                        )
+                    lines.append(
+                        "Usá get_artifact(title) para leer y save_artifact(...) para actualizar."
+                    )
+                    lines.append("---")
+            except Exception:
+                pass
+
         lines.append(
             "\nTrabajá en avanzar este objetivo. "
             "Hacé un paso concreto y pequeño que NO repita lo ya hecho."
