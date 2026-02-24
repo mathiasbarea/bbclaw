@@ -338,6 +338,7 @@ def create_app(orchestrator) -> Any:
                 "status": status_map.get(s, s),
                 "priority": 3,
                 "projectId": "",
+                "createdBy": t.get("created_by", "user"),
                 "createdAt": _iso_to_epoch(created),
                 "updatedAt": _iso_to_epoch(updated),
             })

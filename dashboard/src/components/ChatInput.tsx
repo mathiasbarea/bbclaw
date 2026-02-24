@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, useRef } from 'react';
+import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Command } from 'lucide-react';
 import { AgentAvatar } from './AgentAvatar';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 interface ChatMessage {
     id: string;
@@ -680,11 +682,13 @@ export function ChatInput({
                                             whiteSpace: 'pre-wrap',
                                             minWidth: 0,
                                         }}>
-                                            <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>
+                                            <div style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', whiteSpace: msgAction.role === 'system' ? 'normal' : 'pre-wrap' }}>
                                                 {msgAction.role === 'system' && <span style={{ opacity: 0.5, marginRight: '8px' }}>&gt;</span>}
                                                 {msgAction.typewriter
                                                     ? <TypewriterText text={msgAction.text} onComplete={() => handleTypewriterComplete(msgAction.id)} />
-                                                    : msgAction.text}
+                                                    : msgAction.role === 'system'
+                                                        ? <ChatMarkdown content={msgAction.text} />
+                                                        : msgAction.text}
                                             </div>
                                             <div
                                                 style={{
@@ -720,7 +724,7 @@ export function ChatInput({
                                     value={input}
                                     onChange={handleChange}
                                     onKeyDown={handleInputKeyDown}
-                                    placeholder="Ask the orchestrator, mention @agent or #project..."
+                                    placeholder="Ask the orchestrator, mention #project to switch context"
                                     disabled={isSending}
                                     style={{ width: '100%' }}
                                 />
@@ -782,7 +786,7 @@ export function ChatInput({
 
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 6px', fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>
                                 <span>
-                                    Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>@</strong> agent, <strong>#</strong> project
+                                    Shortcuts: <strong>Esc</strong> close, <strong>Enter</strong> send, <strong>#</strong> project
                                 </span>
                                 <span style={{
                                     padding: '0.15rem 0.5rem',
@@ -818,6 +822,40 @@ export function ChatInput({
                 </motion.div>
             )}
         </AnimatePresence>
+    );
+}
+
+// Compact markdown renderer for chat bubbles
+const chatMarkdownComponents = {
+    h1: ({ children, ...props }: any) => <div style={{ fontSize: '1.05em', fontWeight: 700, margin: '0.4em 0 0.2em' }} {...props}>{children}</div>,
+    h2: ({ children, ...props }: any) => <div style={{ fontSize: '1em', fontWeight: 700, margin: '0.4em 0 0.2em' }} {...props}>{children}</div>,
+    h3: ({ children, ...props }: any) => <div style={{ fontSize: '0.95em', fontWeight: 600, margin: '0.3em 0 0.15em' }} {...props}>{children}</div>,
+    h4: ({ children, ...props }: any) => <div style={{ fontSize: '0.9em', fontWeight: 600, margin: '0.25em 0 0.1em' }} {...props}>{children}</div>,
+    p: ({ children, ...props }: any) => <div style={{ margin: '0.3em 0' }} {...props}>{children}</div>,
+    ul: ({ children, ...props }: any) => <ul style={{ margin: '0.25em 0', paddingLeft: '1.3em' }} {...props}>{children}</ul>,
+    ol: ({ children, ...props }: any) => <ol style={{ margin: '0.25em 0', paddingLeft: '1.3em' }} {...props}>{children}</ol>,
+    li: ({ children, ...props }: any) => <li style={{ margin: '0.1em 0' }} {...props}>{children}</li>,
+    strong: ({ children, ...props }: any) => <strong style={{ fontWeight: 600, color: '#fff' }} {...props}>{children}</strong>,
+    em: ({ children, ...props }: any) => <em style={{ fontStyle: 'italic', opacity: 0.9 }} {...props}>{children}</em>,
+    code: ({ inline, children, ...props }: any) =>
+        inline !== false && !props.className ? (
+            <code style={{ background: 'rgba(255,255,255,0.08)', padding: '0.1em 0.35em', borderRadius: '4px', fontSize: '0.88em', fontFamily: 'monospace' }} {...props}>{children}</code>
+        ) : (
+            <pre style={{ background: 'rgba(0,0,0,0.3)', padding: '0.5em 0.7em', borderRadius: '6px', fontSize: '0.85em', overflowX: 'auto', margin: '0.3em 0' }}><code {...props}>{children}</code></pre>
+        ),
+    a: ({ children, ...props }: any) => <a style={{ color: 'var(--accent-primary)', textDecoration: 'underline' }} target="_blank" rel="noopener noreferrer" {...props}>{children}</a>,
+    blockquote: ({ children, ...props }: any) => <blockquote style={{ borderLeft: '3px solid rgba(99,102,241,0.4)', paddingLeft: '0.7em', margin: '0.3em 0', opacity: 0.85 }} {...props}>{children}</blockquote>,
+    table: ({ children, ...props }: any) => <div style={{ overflowX: 'auto', margin: '0.3em 0' }}><table style={{ borderCollapse: 'collapse', fontSize: '0.88em', width: '100%' }} {...props}>{children}</table></div>,
+    th: ({ children, ...props }: any) => <th style={{ border: '1px solid rgba(255,255,255,0.12)', padding: '0.3em 0.5em', fontWeight: 600, textAlign: 'left' as const }} {...props}>{children}</th>,
+    td: ({ children, ...props }: any) => <td style={{ border: '1px solid rgba(255,255,255,0.08)', padding: '0.3em 0.5em' }} {...props}>{children}</td>,
+    hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.1)', margin: '0.5em 0' }} />,
+};
+
+function ChatMarkdown({ content }: { content: string }) {
+    return (
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={chatMarkdownComponents}>
+            {content}
+        </ReactMarkdown>
     );
 }
 

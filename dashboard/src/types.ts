@@ -3,6 +3,7 @@ export interface TaskSummaryItem {
     title: string;
     status: string;
     priority: number;
+    createdBy?: string;
     projectId: string;
     projectName?: string;
     parentTaskId?: string;

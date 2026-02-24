@@ -32,15 +32,17 @@ class TaskQueue:
         """
         self.agents = agents
         self._memory_context: str = ""
+        self._created_by: str = "user"
         self.last_run_tokens: int = 0
 
-    async def execute(self, plan: Plan, memory_context: str = "") -> Plan:
+    async def execute(self, plan: Plan, memory_context: str = "", intent: str = "user") -> Plan:
         """
         Ejecuta todas las tareas del plan respetando dependencias.
         Modifica el plan in-place (status, result, error de cada TaskSpec).
         Devuelve el plan con resultados completos.
         """
         self._memory_context = memory_context
+        self._created_by = intent
         self.last_run_tokens = 0
         completed_ids: set[str] = set()
 
@@ -152,6 +154,7 @@ class TaskQueue:
                 input=task.description[:2000],
                 result=(task.result or "")[:5000] if task.status == "done" else None,
                 error=(task.error or "")[:2000] if task.status == "failed" else None,
+                created_by=self._created_by,
             )
         except Exception:
             pass

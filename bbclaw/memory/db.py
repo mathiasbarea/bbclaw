@@ -123,6 +123,7 @@ class Database:
     async def _run_migrations(self) -> None:
         """Agrega columnas faltantes a tablas que ya existían. Idempotente."""
         migrations = [
+            "ALTER TABLE improvement_attempts ADD COLUMN cycle INTEGER DEFAULT 0",
             "ALTER TABLE improvement_attempts ADD COLUMN tokens_used INTEGER DEFAULT 0",
             "ALTER TABLE improvement_attempts ADD COLUMN score_before REAL",
             "ALTER TABLE improvement_attempts ADD COLUMN score_after REAL",
@@ -134,6 +135,7 @@ class Database:
             "ALTER TABLE projects ADD COLUMN last_autonomous_at TEXT",
             "ALTER TABLE projects ADD COLUMN autonomous_runs_today INTEGER DEFAULT 0",
             "ALTER TABLE projects ADD COLUMN autonomous_runs_date TEXT DEFAULT ''",
+            "ALTER TABLE tasks ADD COLUMN created_by TEXT DEFAULT 'user'",
         ]
         for sql in migrations:
             try:

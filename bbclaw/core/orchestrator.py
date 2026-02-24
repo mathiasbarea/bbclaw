@@ -94,8 +94,15 @@ class Orchestrator:
         self._pending_reminders: list[dict] = []
         self._last_run_tokens: int = 0
 
-    async def start(self) -> None:
-        """Inicializa todos los subsistemas."""
+    async def start(self, on_progress=None) -> None:
+        """Inicializa todos los subsistemas.
+
+        on_progress: optional callback(msg: str) para reportar avance.
+        """
+        def _progress(msg: str) -> None:
+            if on_progress:
+                on_progress(msg)
+
         mem_cfg = self.config.get("memory", {})
         db_path = mem_cfg.get("db_path", "data/memory.db")
         workspace = self.config.get("workspace", {}).get("root", "workspace")
@@ -104,12 +111,15 @@ class Orchestrator:
         api_cfg = self.config.get("api", {})
         skills_cfg = self.config.get("skills", {})
 
+        _progress("Configurando workspace...")
         from ..tools.filesystem import set_workspace
         set_workspace(workspace)
 
+        _progress("Conectando base de datos...")
         self.db = Database(db_path)
         await self.db.connect()
 
+        _progress("Inicializando memoria vectorial...")
         try:
             self.vectors = VectorMemory(db_path)
             await self.vectors.connect()
@@ -117,6 +127,7 @@ class Orchestrator:
             logger.warning("VectorMemory no disponible: %s", e)
             self.vectors = None
 
+        _progress("Cargando LLM provider...")
         self.provider = _build_provider(self.config)
 
         self.context_builder = ContextBuilder(
@@ -127,7 +138,7 @@ class Orchestrator:
             top_k=mem_cfg.get("top_k_context", 5),
         )
 
-        # Construir agentes especializados
+        _progress("Registrando agentes...")
         from ..agents import build_agent_registry
         self.agents = build_agent_registry(
             provider=self.provider,
@@ -139,7 +150,7 @@ class Orchestrator:
         self.planner = Planner(provider=self.provider)
         self.task_queue = TaskQueue(agents=self.agents)
 
-        # Cargar skills desde skills/
+        _progress("Cargando skills...")
         from ..skills import load_all_skills, set_skills_dir
         skills_dir = skills_cfg.get("dir", "skills")
         set_skills_dir(skills_dir)
@@ -148,8 +159,9 @@ class Orchestrator:
             logger.info("Skills cargados: %s", loaded_skills)
 
         # Git auto-init si no existe .git
-        import subprocess
         if not (Path(".") / ".git").exists():
+            _progress("Inicializando git...")
+            import subprocess
             try:
                 subprocess.run(["git", "init"], capture_output=True, check=True)
                 subprocess.run(["git", "add", "-A"], capture_output=True)
@@ -162,16 +174,22 @@ class Orchestrator:
         await bus.start()
 
         # API HTTP en background (si está habilitada)
+        self._api_ready = False
         if api_cfg.get("enabled", False):
+            _progress("Iniciando API HTTP...")
             import asyncio
             from ..api import start_api_server
             asyncio.create_task(
-                start_api_server(
-                    self,
-                    host=api_cfg.get("host", "127.0.0.1"),
-                    port=api_cfg.get("port", 8765),
+                self._start_api_with_signal(
+                    api_cfg.get("host", "127.0.0.1"),
+                    api_cfg.get("port", 8765),
                 )
             )
+            # Esperar hasta que la API esté lista (max 5s)
+            for _ in range(50):
+                if self._api_ready:
+                    break
+                await asyncio.sleep(0.1)
 
         # ── ErrorCollector: captura errores de bbclaw.* en memoria ───────────
         from .error_collector import ErrorCollector
@@ -179,6 +197,7 @@ class Orchestrator:
         logging.getLogger("bbclaw").addHandler(self._error_collector)
 
         # ── Auto-commit + Background loops ────────────────────────────────────
+        _progress("Iniciando background loops...")
         from ..tools.registry import enable_auto_commit
         enable_auto_commit()
 
@@ -201,6 +220,33 @@ class Orchestrator:
             workspace,
             loaded_skills,
         )
+
+    async def _start_api_with_signal(self, host: str, port: int) -> None:
+        """Inicia el servidor API y señala cuando está listo."""
+        from ..api import start_api_server
+        import uvicorn
+
+        try:
+            from ..api.server import create_app, _FASTAPI_AVAILABLE
+            if not _FASTAPI_AVAILABLE:
+                return
+            app = create_app(self)
+            if app is None:
+                return
+            config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+            server = uvicorn.Server(config)
+            # Señalar ready una vez que el server haya hecho bind
+            original_startup = server.startup
+
+            async def startup_with_signal(*args, **kwargs):
+                await original_startup(*args, **kwargs)
+                self._api_ready = True
+
+            server.startup = startup_with_signal
+            await server.serve()
+        except Exception as e:
+            logger.error("Error iniciando API server: %s", e)
+            self._api_ready = True  # desbloquear el wait aunque falle
 
     async def _extract_and_switch_project(self, text: str) -> str:
         """Si el texto contiene #proyecto, cambia al proyecto y retorna texto limpio."""
@@ -297,6 +343,7 @@ class Orchestrator:
                 input=user_input[:2000],
                 result=(result.output or "")[:5000] if result.success else None,
                 error=(result.error or "")[:2000] if not result.success else None,
+                created_by=intent,
             )
         except Exception:
             pass
@@ -351,7 +398,7 @@ class Orchestrator:
         logger.info("Plan: '%s' (%d tareas)", plan.summary, len(plan.tasks))
 
         # 3. Ejecutar plan
-        plan = await self.task_queue.execute(plan, memory_context=memory_ctx)
+        plan = await self.task_queue.execute(plan, memory_context=memory_ctx, intent=intent)
         self._last_run_tokens = self.task_queue.last_run_tokens
 
         # 4. Sintetizar respuesta

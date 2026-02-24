@@ -274,12 +274,13 @@ function TaskCard({
         ? 'rgba(59, 130, 246, 0.14)'
         : 'rgba(245, 158, 11, 0.14)';
   const isScheduledTemplate = lane === 'scheduled' && 'kind' in task && task.kind === 'template';
+  const intentLabel = ({ user: 'By: User', autonomous: 'By: Autonomous Loop', improvement: 'By: Improvement Loop', behavioral_test: 'By: Behavioral Test' } as Record<string, string>)[task.createdBy || 'user'] || `By: ${task.createdBy}`;
   const recentMeta =
     task.status === 'running'
       ? processingAgentLabel || (task.agentName ? `@${task.agentName}` : 'No agent assigned')
       : task.agentName
         ? `@${task.agentName}`
-        : `Priority ${task.priority}`;
+        : intentLabel;
   const scheduledMeta = task.dueAt
     ? `${isScheduledTemplate ? 'Next run' : 'Due'} ${formatAbsoluteDateTime(task.dueAt)}`
     : `Updated ${formatRelativeAge(task.updatedAt, nowMs)}`;
@@ -289,8 +290,8 @@ function TaskCard({
       : lane === 'scheduled'
         ? isScheduledTemplate
           ? null
-          : `Priority ${task.priority}`
-        : `Priority ${task.priority}`;
+          : intentLabel
+        : intentLabel;
   const secondaryMeta = lane === 'scheduled' ? scheduledMeta : `Updated ${formatRelativeAge(task.updatedAt, nowMs)}`;
 
   return (
@@ -664,11 +665,7 @@ function App() {
 
   const visibleUpcomingCount = visibleAwaitingNow.length + visibleScheduledTasks.length;
 
-  const visibleActiveAgentsCount = selectedAgentId
-    ? selectedAgent?.isActive
-      ? 1
-      : 0
-    : metrics?.activeAgents || 0;
+  const runningTasksCount = metrics?.tasks?.running ?? 0;
   const visibleCompletedTasksCount = selectedAgentId
     ? visibleRecentTasks.filter((task) => task.status === 'completed').length
     : metrics?.tasks.completed || 0;
@@ -1149,7 +1146,7 @@ function App() {
           System Online
         </div>
 
-        <Orb pendingCount={visiblePendingCount} activeAgents={visibleActiveAgentsCount} />
+        <Orb pendingCount={visiblePendingCount} activeTasks={runningTasksCount} />
 
         <div style={{ marginTop: '5rem', display: 'flex', gap: '2rem' }}>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -1167,9 +1164,6 @@ function App() {
             <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-primary)', marginTop: '4px', opacity: 0.8 }}>Last 24hs</span>
           </div>
         </div>
-        <p style={{ marginTop: '1.2rem', fontSize: '0.72rem', letterSpacing: '0.04em', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
-          {selectedAgent ? `Filter: @${selectedAgent.name}` : 'Filter: all agents'}
-        </p>
       </motion.div>
 
 
@@ -1318,7 +1312,7 @@ function App() {
         {/* Col 2: Active Tasks */}
         <div className="glass-panel column-panel column-recent" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
           <h2 className="column-header">
-            <span>{selectedAgent ? 'Recent Tasks' : 'Parent Tasks'}</span>
+            <span>Recent Tasks</span>
             <span className="column-subtitle"><AnimatedNumber value={visibleRecentTasks.length} /> Last 24hs</span>
           </h2>
 
@@ -1343,18 +1337,14 @@ function App() {
                 </motion.div>
               ))}
             </AnimatePresence>
-            <p className={`task-empty-message ${visibleRecentTasks.length === 0 ? 'visible' : 'hidden'}`}>
-              {selectedAgent
-                ? `No recent tasks for @${selectedAgent.name} in the last 24hs.`
-                : 'No parent tasks in the last 24hs.'}
-            </p>
+            <p className={`task-empty-message ${visibleRecentTasks.length === 0 ? 'visible' : 'hidden'}`}>No recent tasks in the last 24hs.</p>
           </div>
         </div>
 
         {/* Col 3: Upcoming Tasks */}
         <div className="glass-panel column-panel column-awaiting" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
           <h2 className="column-header">
-            <span>{selectedAgent ? 'Upcoming Tasks' : 'Upcoming Parent Tasks'}</span>
+            <span>Upcoming Tasks</span>
             <span className="column-subtitle"><AnimatedNumber value={visibleUpcomingCount} /> Total</span>
           </h2>
 
@@ -1474,7 +1464,7 @@ function App() {
                     <span className="chip neutral">
                       {selectedTaskDetail.agentName ? `@${selectedTaskDetail.agentName}` : 'No agent assigned'}
                     </span>
-                    <span className="chip neutral">Priority {selectedTaskDetail.priority}</span>
+                    <span className="chip neutral">{({ user: 'By: User', autonomous: 'By: Autonomous Loop', improvement: 'By: Improvement Loop', behavioral_test: 'By: Behavioral Test' } as Record<string, string>)[selectedTaskDetail.createdBy || 'user'] || `By: ${selectedTaskDetail.createdBy}`}</span>
                   </div>
 
                   {canCancelSelectedTask ? (

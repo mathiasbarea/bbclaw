@@ -13,14 +13,14 @@ interface SleepGlyph {
 }
 
 const IDLE_THRESHOLD_MS = 10_000;
-const SLEEP_COOLDOWN_MS = 20_000;
+const SLEEP_COOLDOWN_MS = 120_000;
 const PRE_SLEEP_PHASE_ONE_MS = 500;
 const PRE_SLEEP_PHASE_TWO_MS = 700;
 const PRE_SLEEP_PHASE_THREE_MS = 600;
 const PRE_SLEEP_TOTAL_MS = PRE_SLEEP_PHASE_ONE_MS + PRE_SLEEP_PHASE_TWO_MS + PRE_SLEEP_PHASE_THREE_MS;
 const WAKE_SURPRISE_MS = 650;
 
-export function Orb({ pendingCount, activeAgents }: { pendingCount: number; activeAgents: number }) {
+export function Orb({ pendingCount, activeTasks }: { pendingCount: number; activeTasks: number }) {
     const orbRef = useRef<HTMLDivElement>(null);
     const [eyeOffset, setEyeOffset] = useState({ x: 0, y: 0 });
     const [blinkScale, setBlinkScale] = useState(1);
@@ -31,7 +31,7 @@ export function Orb({ pendingCount, activeAgents }: { pendingCount: number; acti
     const [cooldownTick, setCooldownTick] = useState(0);
 
     const orbMoodRef = useRef<OrbMood>('awake');
-    const activeAgentsRef = useRef(activeAgents);
+    const activeTasksRef = useRef(activeTasks);
     const isUserIdleRef = useRef(false);
     const lastActivityAtRef = useRef(Date.now());
     const sleepCooldownUntilRef = useRef(0);
@@ -45,8 +45,8 @@ export function Orb({ pendingCount, activeAgents }: { pendingCount: number; acti
     }, [orbMood]);
 
     useEffect(() => {
-        activeAgentsRef.current = activeAgents;
-    }, [activeAgents]);
+        activeTasksRef.current = activeTasks;
+    }, [activeTasks]);
 
     const clearPreSleepTimers = useCallback(() => {
         if (preSleepTimeoutsRef.current.length > 0) {
@@ -167,12 +167,12 @@ export function Orb({ pendingCount, activeAgents }: { pendingCount: number; acti
     }, [triggerWakeSurprised]);
 
     const canContinueSleepSequence = useCallback(() => {
-        return isUserIdleRef.current && activeAgentsRef.current === 0 && Date.now() >= sleepCooldownUntilRef.current;
+        return isUserIdleRef.current && activeTasksRef.current === 0 && Date.now() >= sleepCooldownUntilRef.current;
     }, []);
 
     // Sleep transition logic (awake -> pre_sleep -> sleeping).
     useEffect(() => {
-        if (activeAgents > 0) {
+        if (activeTasks > 0) {
             triggerWakeSurprised();
             return;
         }
@@ -234,7 +234,7 @@ export function Orb({ pendingCount, activeAgents }: { pendingCount: number; acti
         }, PRE_SLEEP_TOTAL_MS);
 
         preSleepTimeoutsRef.current = [toPhaseTwoTimer, toPhaseThreeTimer, toSleepingTimer];
-    }, [activeAgents, isUserIdle, orbMood, cooldownTick, canContinueSleepSequence, clearPreSleepTimers, triggerWakeSurprised]);
+    }, [activeTasks, isUserIdle, orbMood, cooldownTick, canContinueSleepSequence, clearPreSleepTimers, triggerWakeSurprised]);
 
     // Natural blinking only while awake.
     useEffect(() => {

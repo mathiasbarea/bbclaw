@@ -8,16 +8,8 @@ cd /d "%~dp0"
 ::      bb --verbose    → logs detallados
 :: ──────────────────────────────────────────────────────────────────────────
 
-:: Parse --no-dash de los args
-set "NODASH=0"
-set "BBARGS="
-for %%a in (%*) do (
-    if /i "%%a"=="--no-dash" (
-        set "NODASH=1"
-    ) else (
-        set "BBARGS=%BBARGS% %%a"
-    )
-)
+:: Todos los args se pasan directo a bbclaw (--no-dash, --verbose, etc.)
+set "BBARGS=%*"
 
 :: 1. Crear entorno virtual si no existe
 if not exist ".venv\Scripts\python.exe" (
@@ -64,14 +56,10 @@ if exist "dashboard\src" (
     )
 )
 
-:: 4. Abrir dashboard en el browser después de 3s (si no está --no-dash)
-if "%NODASH%"=="0" (
-    start "" /b cmd /c "ping -n 4 127.0.0.1 >nul 2>&1 && start http://127.0.0.1:8765/"
-)
-
-:: 5. Restart loop — exit code 42 = reiniciar pedido por el sistema
+:: 4. Restart loop — exit code 42 = reiniciar pedido por el sistema
+:: (el dashboard se abre desde Python una vez que la API está lista)
 :restart_loop
-.venv\Scripts\bbclaw%BBARGS%
+.venv\Scripts\bbclaw %BBARGS%
 if %errorlevel% EQU 42 (
     echo [bb] Reiniciando sistema...
     goto restart_loop

@@ -64,15 +64,29 @@ def setup_logging(verbose: bool) -> None:
     )
 
 
-async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
+async def repl(orchestrator: Orchestrator, verbose: bool, open_dashboard: bool = True) -> None:
     """Loop interactivo principal."""
     setup_logging(verbose)
 
     console.print(_make_banner(), style="bold cyan")
-    console.print("Iniciando sistema...", style="dim")
 
-    await orchestrator.start()
+    with console.status("[bold yellow]Iniciando sistema...[/bold yellow]", spinner="dots") as status:
+        def _on_progress(msg: str) -> None:
+            status.update(f"[bold yellow]{msg}[/bold yellow]")
+
+        await orchestrator.start(on_progress=_on_progress)
+
     console.print("✓ Sistema listo.\n", style="bold green")
+
+    # Abrir dashboard en el browser (solo si la API arrancó OK)
+    if open_dashboard and orchestrator._api_ready:
+        try:
+            import webbrowser
+            api_cfg = orchestrator.config.get("api", {})
+            port = api_cfg.get("port", 8765)
+            webbrowser.open(f"http://127.0.0.1:{port}/")
+        except Exception:
+            pass
 
     # Show missed reminders (fired while offline)
     try:
@@ -339,7 +353,13 @@ async def repl(orchestrator: Orchestrator, verbose: bool) -> None:
     default=False,
     help="Mostrar logs detallados",
 )
-def cli(config: str, verbose: bool) -> None:
+@click.option(
+    "--no-dash",
+    is_flag=True,
+    default=False,
+    help="No abrir el dashboard en el browser",
+)
+def cli(config: str, verbose: bool, no_dash: bool) -> None:
     f"""
     {SYSTEM_NAME} — Sistema de agentes auto-mejorable.
 
@@ -348,7 +368,7 @@ def cli(config: str, verbose: bool) -> None:
     """
     orchestrator = Orchestrator(config_path=config)
     try:
-        asyncio.run(repl(orchestrator, verbose))
+        asyncio.run(repl(orchestrator, verbose, open_dashboard=not no_dash))
     finally:
         asyncio.run(orchestrator.stop())
 

@@ -77,7 +77,8 @@ Herramientas disponibles:
 Reglas:
 - Usa la herramienta más específica disponible para cada acción
 - Sé preciso y conciso en tus respuestas finales
-- Siempre verifica el resultado de los comandos antes de continuar"""
+- Siempre verifica el resultado de los comandos antes de continuar
+- Antes de ejecutar acciones destructivas (delete_project, limpiar un objective con texto vacío), pedí confirmación al usuario mostrando qué se va a eliminar y esperá su respuesta"""
 
         if context.memory_context:
             base += f"\n\n--- Contexto relevante ---\n{context.memory_context}"
