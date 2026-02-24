@@ -219,6 +219,14 @@ class ImprovementLoop:
 
         logger.info("Improvement cycle %d: creando branch %s", cycle, branch)
 
+        # Capture score before cycle
+        score_before: float | None = None
+        if self.orch.db:
+            try:
+                score_before = await self.orch.db.compute_current_score()
+            except Exception as e:
+                logger.warning("Could not compute score_before: %s", e)
+
         try:
             # 1. Crear branch desde main
             await self._git_exec("git", "checkout", "-b", branch)
@@ -253,43 +261,45 @@ class ImprovementLoop:
                     "identificá una mejora concreta (bug fix, optimización, feature pequeño), "
                     "implementala y verificá que funciona. Hacé cambios pequeños y seguros."
                 )
+            agent_completed = False
             try:
                 result = await asyncio.wait_for(
                     self.orch.run(prompt, intent="improvement"),
                     timeout=300,  # 5 min max por ciclo
                 )
+                agent_completed = True
             except asyncio.TimeoutError:
                 error_msg = "Timeout: ciclo excedió 5 minutos"
                 logger.warning(error_msg)
-                return
 
-            # 3. Ver cambios
-            proc = await asyncio.create_subprocess_exec(
-                "git", "diff", "--name-only", "main",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, _ = await proc.communicate()
-            changed_files = [f for f in stdout.decode().strip().split("\n") if f]
-
-            if changed_files:
-                # Commit cambios
-                await self._git_exec("git", "add", "-A")
-                await self._git_exec(
-                    "git", "commit", "-m", f"improve: cycle {cycle}"
+            # 3. Ver cambios (solo si el agente terminó sin timeout)
+            if agent_completed:
+                proc = await asyncio.create_subprocess_exec(
+                    "git", "diff", "--name-only", "main",
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                # Merge a main
-                await self._git_exec("git", "checkout", "main")
-                await self._git_exec("git", "merge", branch, "--no-edit")
-                merged = True
-                logger.info("Cycle %d merged: %s", cycle, changed_files)
-                # Post-merge: marcar errores como resueltos si estábamos en error mode
-                if error_context and collector:
-                    collector.mark_all_resolved()
-                    logger.info("Cycle %d: errores marcados como resueltos post-merge", cycle)
-            else:
-                self._consecutive_no_improvement += 1
-                logger.info("Cycle %d: sin cambios", cycle)
+                stdout, _ = await proc.communicate()
+                changed_files = [f for f in stdout.decode().strip().split("\n") if f]
+
+                if changed_files:
+                    # Commit cambios
+                    await self._git_exec("git", "add", "-A")
+                    await self._git_exec(
+                        "git", "commit", "-m", f"improve: cycle {cycle}"
+                    )
+                    # Merge a main
+                    await self._git_exec("git", "checkout", "main")
+                    await self._git_exec("git", "merge", branch, "--no-edit")
+                    merged = True
+                    logger.info("Cycle %d merged: %s", cycle, changed_files)
+                    # Post-merge: marcar errores como resueltos si estábamos en error mode
+                    if error_context and collector:
+                        collector.mark_all_resolved()
+                        logger.info("Cycle %d: errores marcados como resueltos post-merge", cycle)
+                else:
+                    self._consecutive_no_improvement += 1
+                    logger.info("Cycle %d: sin cambios", cycle)
 
         except Exception as e:
             error_msg = str(e)
@@ -305,21 +315,33 @@ class ImprovementLoop:
         # Capture tokens used from the orchestrator's last run
         self._last_cycle_tokens = getattr(self.orch, '_last_run_tokens', 0)
 
+        # Capture score after cycle
+        score_after: float | None = None
+        if self.orch.db:
+            try:
+                score_after = await self.orch.db.compute_current_score()
+            except Exception as e:
+                logger.warning("Could not compute score_after: %s", e)
+
         # Guardar intento en DB
         self._last_run_at = datetime.now(timezone.utc).isoformat()
         if merged:
             self._consecutive_no_improvement = 0
+        if score_before is not None and score_after is not None:
+            self._last_score_delta = score_after - score_before
 
         if self.orch.db:
             try:
                 import json
                 await self.orch.db.save_improvement_attempt(
                     cycle=cycle,
-                    branch=branch,
+                    branch_name=branch,
                     changed_files=json.dumps(changed_files),
                     merged=1 if merged else 0,
                     tokens_used=self._last_cycle_tokens,
                     error=error_msg,
+                    score_before=score_before,
+                    score_after=score_after,
                 )
             except Exception as e:
                 logger.error("Error guardando improvement attempt: %s", e)
@@ -334,10 +356,20 @@ class ImprovementLoop:
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
         if proc.returncode != 0:
-            raise RuntimeError(f"git error: {stderr.decode().strip()}")
+            err = stderr.decode().strip() or stdout.decode().strip()
+            raise RuntimeError(f"git error ({args}): {err}")
         return stdout.decode().strip()
 
     async def _git_checkout_main(self) -> None:
+        # Discard uncommitted changes that may block checkout
+        try:
+            await self._git_exec("git", "checkout", "--", ".")
+        except Exception:
+            pass
+        try:
+            await self._git_exec("git", "clean", "-fd")
+        except Exception:
+            pass
         try:
             await self._git_exec("git", "checkout", "main")
         except Exception:

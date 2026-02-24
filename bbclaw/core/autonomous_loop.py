@@ -99,11 +99,11 @@ class AutonomousLoop:
             f"Objetivo: {proj['objective']}",
         ]
 
-        # Inyectar historial de trabajo previo
+        # Inyectar historial de trabajo previo (por project_id)
         if self.orch.db:
             try:
-                recent = await self.orch.db.get_recent_autonomous_conversations(
-                    proj["name"], limit=3
+                recent = await self.orch.db.get_conversations_by_project(
+                    proj["id"], limit=3
                 )
                 if recent:
                     lines.append("\n--- Trabajo previo (últimos ciclos) ---")
@@ -256,6 +256,11 @@ class AutonomousLoop:
                         timeout=300,
                     )
                     await self.orch.db.update_project_last_autonomous(proj["id"])
+                    # Tag conversation with project_id for future lookups
+                    try:
+                        await self.orch.db.tag_latest_conversation_project(proj["id"])
+                    except Exception:
+                        pass
                     logger.info("Autonomous: progreso en proyecto '%s'", proj["name"])
                 except asyncio.TimeoutError:
                     await self.orch.db.update_project_last_autonomous(proj["id"])

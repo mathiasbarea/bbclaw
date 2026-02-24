@@ -139,6 +139,7 @@ class Database:
             "ALTER TABLE projects ADD COLUMN is_system INTEGER DEFAULT 0",
             "ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''",
             "ALTER TABLE scheduled_items ADD COLUMN project_id TEXT DEFAULT ''",
+            "ALTER TABLE conversations ADD COLUMN project_id TEXT DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -349,7 +350,7 @@ class Database:
     async def get_projects_with_objective(self) -> list[dict]:
         return await self.fetchall(
             "SELECT * FROM projects WHERE objective IS NOT NULL AND objective != '' "
-            "ORDER BY last_autonomous_at ASC NULLS FIRST, last_used_at DESC"
+            "ORDER BY COALESCE(last_autonomous_at, '0000-01-01') ASC, last_used_at DESC"
         )
 
     async def update_project_last_autonomous(self, project_id: str) -> None:
@@ -370,15 +371,38 @@ class Database:
             (new_count, today, project_id),
         )
 
-    async def get_recent_autonomous_conversations(
-        self, search_term: str, limit: int = 3
+    async def get_conversations_by_project(
+        self, project_id: str, limit: int = 3
     ) -> list[dict]:
+        """Get recent conversations tagged with a specific project_id."""
         return await self.fetchall(
             "SELECT user_msg, agent_msg, timestamp FROM conversations "
-            "WHERE user_msg LIKE ? "
+            "WHERE project_id = ? "
             "ORDER BY id DESC LIMIT ?",
-            (f"%{search_term}%", limit),
+            (project_id, limit),
         )
+
+    async def tag_latest_conversation_project(self, project_id: str) -> None:
+        """Tag the most recent conversation with a project_id."""
+        await self.execute(
+            "UPDATE conversations SET project_id = ? "
+            "WHERE id = (SELECT MAX(id) FROM conversations)",
+            (project_id,),
+        )
+
+    # ── Metrics ─────────────────────────────────────────────────────────────────
+
+    async def compute_current_score(self) -> float:
+        """Compute a simple score from recent user task outcomes (last 7 days)."""
+        row = await self.fetchone(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS successes "
+            "FROM tasks WHERE intent = 'user' "
+            "AND created_at >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-7 days')"
+        )
+        if not row or not row["total"]:
+            return 0.0
+        return row["successes"] / row["total"]
 
     # ── Improvement Attempts ───────────────────────────────────────────────────
 
