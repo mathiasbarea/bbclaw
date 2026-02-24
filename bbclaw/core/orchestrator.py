@@ -243,7 +243,12 @@ class Orchestrator:
                 self._api_ready = True
 
             server.startup = startup_with_signal
-            await server.serve()
+            try:
+                await server.serve()
+            except asyncio.CancelledError:
+                await server.shutdown()
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
             logger.error("Error iniciando API server: %s", e)
             self._api_ready = True  # desbloquear el wait aunque falle
