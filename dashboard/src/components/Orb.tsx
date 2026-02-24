@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 type OrbMood = 'awake' | 'pre_sleep' | 'sleeping' | 'wake_surprised';
@@ -20,8 +20,12 @@ const PRE_SLEEP_PHASE_THREE_MS = 600;
 const PRE_SLEEP_TOTAL_MS = PRE_SLEEP_PHASE_ONE_MS + PRE_SLEEP_PHASE_TWO_MS + PRE_SLEEP_PHASE_THREE_MS;
 const WAKE_SURPRISE_MS = 650;
 
+const ORB_BASE_SIZE = 280;
+
 export function Orb({ pendingCount, activeTasks }: { pendingCount: number; activeTasks: number }) {
     const orbRef = useRef<HTMLDivElement>(null);
+    const wrapperRef = useRef<HTMLDivElement>(null);
+    const [containerSize, setContainerSize] = useState<{ w: number; h: number } | null>(null);
     const [eyeOffset, setEyeOffset] = useState({ x: 0, y: 0 });
     const [blinkScale, setBlinkScale] = useState(1);
     const [isUserIdle, setIsUserIdle] = useState(false);
@@ -39,6 +43,27 @@ export function Orb({ pendingCount, activeTasks }: { pendingCount: number; activ
     const wakeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const glyphCounterRef = useRef(0);
+
+    // ResizeObserver to measure available space and compute scale factor.
+    useEffect(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        const ro = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                const { width, height } = entry.contentRect;
+                setContainerSize({ w: width, h: height });
+            }
+        });
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    const orbScale = useMemo(() => {
+        if (!containerSize) return 1;
+        const available = Math.min(containerSize.w, containerSize.h);
+        const s = available / ORB_BASE_SIZE;
+        return Math.min(s, 1); // never upscale beyond 1
+    }, [containerSize]);
 
     useEffect(() => {
         orbMoodRef.current = orbMood;
@@ -393,7 +418,30 @@ export function Orb({ pendingCount, activeTasks }: { pendingCount: number; activ
                     : { duration: 5.8, ease: 'easeInOut' as const, repeat: Infinity };
 
     return (
-        <div style={{ position: 'relative', width: '280px', height: '280px' }} ref={orbRef}>
+        <div
+            ref={wrapperRef}
+            style={{
+                width: '100%',
+                maxWidth: `${ORB_BASE_SIZE}px`,
+                aspectRatio: '1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 1,
+                minWidth: 0,
+                minHeight: 0,
+            }}
+        >
+        <div
+            style={{
+                position: 'relative',
+                width: `${ORB_BASE_SIZE}px`,
+                height: `${ORB_BASE_SIZE}px`,
+                transform: `scale(${orbScale})`,
+                transformOrigin: 'center center',
+            }}
+            ref={orbRef}
+        >
             {/* Animated Gradient Behind */}
             <motion.div
                 style={{
@@ -539,6 +587,7 @@ export function Orb({ pendingCount, activeTasks }: { pendingCount: number; activ
                     )}
                 </AnimatePresence>
             </motion.div>
+        </div>
         </div>
     );
 }

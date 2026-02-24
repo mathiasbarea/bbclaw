@@ -1150,7 +1150,7 @@ function App() {
       {/* 1. Left Orb / Vitals */}
       <motion.div
         className="vitass-col"
-        style={{ flex: '0 0 350px', marginTop: 'var(--live-dashboard-offset)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
+        style={{ flex: '0 0 350px', marginTop: 'var(--live-dashboard-offset)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10, minHeight: 0, overflow: 'visible' }}
         initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }}
       >
         <Orb pendingCount={visiblePendingCount} activeTasks={runningTasksCount} />
