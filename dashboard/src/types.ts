@@ -139,7 +139,9 @@ export interface ProjectOverviewItem {
     name: string;
     slug: string;
     status: string;
-    taskCounts: StatusCounts;
+    isSystem?: boolean;
+    taskCount24h?: number;
+    taskCounts?: StatusCounts;
 }
 
 export interface StatusCounts {

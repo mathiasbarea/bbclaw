@@ -93,6 +93,7 @@ class Orchestrator:
         self._error_collector: Any = None
         self._pending_reminders: list[dict] = []
         self._last_run_tokens: int = 0
+        self.system_project_id: str | None = None
 
     async def start(self, on_progress=None) -> None:
         """Inicializa todos los subsistemas.
@@ -118,6 +119,9 @@ class Orchestrator:
         _progress("Conectando base de datos...")
         self.db = Database(db_path)
         await self.db.connect()
+
+        _progress("Verificando proyecto system...")
+        self.system_project_id = await self.db.ensure_system_project()
 
         _progress("Inicializando memoria vectorial...")
         try:
@@ -296,6 +300,13 @@ class Orchestrator:
         cleaned = (text[:start] + text[match.end():]).strip()
         return cleaned or text  # si queda vacío, devolver original
 
+    def _active_project_id(self) -> str:
+        """Return the active project_id, falling back to system project."""
+        from ..tools.projects import get_current_session
+        session = get_current_session()
+        pid = getattr(session, "active_project_id", None) if session else None
+        return pid or self.system_project_id or ""
+
     _MULTI_STEP_KEYWORDS = (
         "y luego", "después", "primero", "paso 1", "paso 2",
         "1.", "2.", "además", "investiga y", "analiza y",
@@ -349,6 +360,7 @@ class Orchestrator:
                 result=(result.output or "")[:5000] if result.success else None,
                 error=(result.error or "")[:2000] if not result.success else None,
                 created_by=intent,
+                project_id=self._active_project_id(),
             )
         except Exception:
             pass
@@ -403,7 +415,7 @@ class Orchestrator:
         logger.info("Plan: '%s' (%d tareas)", plan.summary, len(plan.tasks))
 
         # 3. Ejecutar plan
-        plan = await self.task_queue.execute(plan, memory_context=memory_ctx, intent=intent)
+        plan = await self.task_queue.execute(plan, memory_context=memory_ctx, intent=intent, project_id=self._active_project_id())
         self._last_run_tokens = self.task_queue.last_run_tokens
 
         # 4. Sintetizar respuesta

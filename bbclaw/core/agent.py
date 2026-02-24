@@ -200,10 +200,10 @@ Reglas:
                     "[%s] Error transitorio (intento %d/%d): %s",
                     self.name, attempt + 1, max_retries + 1, last_error,
                 )
-            except (asyncio.TimeoutError, OSError, ConnectionError) as e:
+            except (asyncio.TimeoutError, httpx.TimeoutException, OSError, ConnectionError) as e:
                 last_error = e
                 logger.warning(
-                    "[%s] Error de red (intento %d/%d): %s",
+                    "[%s] Error de red/timeout (intento %d/%d): %s",
                     self.name, attempt + 1, max_retries + 1, e,
                 )
 

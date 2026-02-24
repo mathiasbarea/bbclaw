@@ -214,7 +214,10 @@ class AutonomousLoop:
                 await self._process_scheduled_items()
 
                 # ── Procesamiento de objetivos (frecuencia dinámica) ─────
-                projects = await self.orch.db.get_projects_with_objective()
+                projects = [
+                    p for p in await self.orch.db.get_projects_with_objective()
+                    if p.get("slug") != "system"
+                ]
                 project_count = len(projects)
                 interval = self._compute_objective_interval(project_count)
                 self._objective_interval_minutes = interval

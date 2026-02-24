@@ -287,6 +287,9 @@ async def edit_project(
             return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
         return f"Proyecto no encontrado: '{name_or_slug}'."
 
+    if project.get("is_system"):
+        return "Error: el proyecto System no puede modificarse."
+
     if not new_name and not new_description:
         return "Nada que actualizar: proporciona new_name y/o new_description."
 
@@ -345,6 +348,9 @@ async def delete_project(name_or_slug: str) -> str:
             slugs = ", ".join(p["slug"] for p in candidates)
             return f"Múltiples proyectos coinciden: {slugs}. Sé más específico."
         return f"Proyecto no encontrado: '{name_or_slug}'."
+
+    if project.get("is_system"):
+        return "Error: el proyecto System no puede eliminarse."
 
     await db.delete_project(project["id"])
 
@@ -408,6 +414,9 @@ async def set_project_objective(objective: str, name_or_slug: str = "") -> str:
         project = await db.fetchone("SELECT * FROM projects WHERE id = ?", (active_id,))
         if not project:
             return "Proyecto activo no encontrado en la base de datos."
+
+    if project.get("is_system"):
+        return "Error: el proyecto System no puede modificarse."
 
     await db.update_project_objective(project["id"], objective)
     if objective:

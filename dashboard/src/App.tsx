@@ -376,6 +376,7 @@ function App() {
   const [templateEditForm, setTemplateEditForm] = useState<TemplateEditFormState | null>(null);
   const [pendingConfirmAction, setPendingConfirmAction] = useState<PendingConfirmAction | null>(null);
   const [activeProject, setActiveProject] = useState<{ id: string | null; name: string | null; slug: string | null; objective?: string }>({ id: null, name: null, slug: null });
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [clockNow, setClockNow] = useState(() => Date.now());
   const [pulseTrigger, setPulseTrigger] = useState(0);
   const lastPulse = useRef(0);
@@ -419,12 +420,19 @@ function App() {
         });
         setObjectiveRefreshTick((current) => current + 1);
         setImprovementStatus(improvementStatusData);
-        setRecentTasks(Array.isArray(runTasks) ? runTasks : []);
+        const projList = Array.isArray(proj) ? proj : [];
+        const projMap: Record<string, string> = {};
+        for (const p of projList) { projMap[p.id] = p.name; }
+        const enrichedTasks = Array.isArray(runTasks) ? runTasks.map((t: any) => ({
+          ...t,
+          projectName: t.projectName || (projMap[t.projectId] ?? ''),
+        })) : [];
+        setRecentTasks(enrichedTasks);
         setUpcomingTasks({
           awaitingNow: Array.isArray(upcoming?.awaitingNow) ? upcoming.awaitingNow : [],
           scheduled: Array.isArray(upcoming?.scheduled) ? upcoming.scheduled : [],
         });
-        setProjects(Array.isArray(proj) ? proj : []);
+        setProjects(projList);
         if (activeProj && typeof activeProj === 'object') {
           setActiveProject(activeProj);
         }
@@ -639,34 +647,42 @@ function App() {
     []
   );
 
+  const projectNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of projects) {
+      map[p.id] = p.name;
+    }
+    return map;
+  }, [projects]);
+
   const visibleRecentTasks = useMemo(() => {
-    const agentFiltered = selectedAgentId
-      ? recentTasks.filter((task) => task.agentId === selectedAgentId)
-      : recentTasks;
-    if (selectedAgentId) return agentFiltered;
-    return agentFiltered.filter((task) => !task.parentTaskId);
-  }, [recentTasks, selectedAgentId]);
+    let filtered = recentTasks.filter((task) => !task.parentTaskId);
+    if (selectedProjectId) {
+      filtered = filtered.filter((task) => task.projectId === selectedProjectId);
+    }
+    return filtered;
+  }, [recentTasks, selectedProjectId]);
 
   const visibleAwaitingNow = useMemo(() => {
-    const agentFiltered = selectedAgentId
-      ? upcomingTasks.awaitingNow.filter((task) => task.agentId === selectedAgentId)
-      : upcomingTasks.awaitingNow;
-    if (selectedAgentId) return agentFiltered;
-    return agentFiltered.filter((task) => !task.parentTaskId);
-  }, [upcomingTasks.awaitingNow, selectedAgentId]);
+    let filtered = upcomingTasks.awaitingNow.filter((task) => !task.parentTaskId);
+    if (selectedProjectId) {
+      filtered = filtered.filter((task: any) => task.projectId === selectedProjectId);
+    }
+    return filtered;
+  }, [upcomingTasks.awaitingNow, selectedProjectId]);
 
   const visibleScheduledTasks = useMemo(() => {
-    const agentFiltered = selectedAgentId
-      ? upcomingTasks.scheduled.filter((task) => task.agentId === selectedAgentId)
-      : upcomingTasks.scheduled;
-    if (selectedAgentId) return agentFiltered;
-    return agentFiltered.filter((task) => task.kind === 'template' || !task.parentTaskId);
-  }, [upcomingTasks.scheduled, selectedAgentId]);
+    let filtered = upcomingTasks.scheduled.filter((task) => task.kind === 'template' || !task.parentTaskId);
+    if (selectedProjectId) {
+      filtered = filtered.filter((task: any) => task.projectId === selectedProjectId);
+    }
+    return filtered;
+  }, [upcomingTasks.scheduled, selectedProjectId]);
 
   const visibleUpcomingCount = visibleAwaitingNow.length + visibleScheduledTasks.length;
 
   const runningTasksCount = metrics?.tasks?.running ?? 0;
-  const visibleCompletedTasksCount = selectedAgentId
+  const visibleCompletedTasksCount = selectedProjectId
     ? visibleRecentTasks.filter((task) => task.status === 'completed').length
     : metrics?.tasks.completed || 0;
   const visiblePendingCount = visibleUpcomingCount;
@@ -1137,15 +1153,6 @@ function App() {
         style={{ flex: '0 0 350px', marginTop: 'var(--live-dashboard-offset)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}
         initial={{ opacity: 0, x: -50 }} animate={{ opacity: 1, x: 0 }}
       >
-        <div style={{
-          background: 'rgba(255,255,255,0.03)', padding: '0.6rem 2.25rem', borderRadius: '30px',
-          border: '1px solid var(--border-card)', marginBottom: '5rem', fontSize: '0.85rem',
-          fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase',
-          boxShadow: '0 8px 32px rgba(0,0,0,0.4)', backdropFilter: 'blur(10px)'
-        }}>
-          System Online
-        </div>
-
         <Orb pendingCount={visiblePendingCount} activeTasks={runningTasksCount} />
 
         <div style={{ marginTop: '5rem', display: 'flex', gap: '2rem' }}>
@@ -1164,148 +1171,126 @@ function App() {
             <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--accent-primary)', marginTop: '4px', opacity: 0.8 }}>Last 24hs</span>
           </div>
         </div>
+
+        {/* Loop Status — below orb stats */}
+        <div style={{ marginTop: '3rem', width: '100%', maxWidth: '320px', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <div style={{fontSize: "0.7rem", fontWeight: 600, color: "var(--text-secondary, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "0.25rem"}}>
+            Loop Status
+          </div>
+          {/* Autonomous Loop */}
+          <div style={{background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-card)", borderRadius: "8px", padding: "0.6rem 0.75rem"}}>
+            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Autonomous</span>
+              <span className={`status-chip ${improvementStatus?.autonomousLoop.isRunning ? "status-running" : "status-idle"}`} style={{fontSize: "0.6rem", padding: "1px 6px"}}>
+                {improvementStatus?.autonomousLoop.isRunning ? "Active" : "Idle"}
+              </span>
+            </div>
+            <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.2rem"}}>
+              {improvementStatus?.autonomousLoop.projectsWithObjective ?? 0} objectives · {improvementStatus?.autonomousLoop.activeScheduledItems ?? 0} scheduled
+            </div>
+            <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.15rem"}}>
+              {improvementStatus?.autonomousLoop.lastTickAt
+                ? `Last run: ${formatRelativeAge(Math.floor(new Date(improvementStatus.autonomousLoop.lastTickAt).getTime() / 1000), clockNow)}`
+                : 'No runs yet'}
+              {improvementStatus?.autonomousLoop.tickMinutes ? ` · every ${improvementStatus.autonomousLoop.tickMinutes}m` : ''}
+            </div>
+          </div>
+          {/* Improvement Loop */}
+          <div style={{background: "rgba(255,255,255,0.03)", border: "1px solid var(--border-card)", borderRadius: "8px", padding: "0.6rem 0.75rem"}}>
+            <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
+              <span style={{fontSize: "0.75rem", fontWeight: 600}}>Improvement</span>
+              <span className={`status-chip ${improvementStatus?.improvementLoop.isRunning ? "status-running" : "status-idle"}`} style={{fontSize: "0.6rem", padding: "1px 6px"}}>
+                {improvementStatus?.improvementLoop.isRunning ? "Running" : "Idle"}
+              </span>
+            </div>
+            {(() => {
+              const nextRun = improvementStatus?.improvementLoop.nextRunAt;
+              if (nextRun) {
+                const remainMs = new Date(nextRun).getTime() - clockNow;
+                if (remainMs > 0) {
+                  const h = Math.floor(remainMs / 3_600_000);
+                  const m = Math.floor((remainMs % 3_600_000) / 60_000);
+                  return <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.2rem"}}>Next: {h}h {m}m</div>;
+                }
+                return <div style={{fontSize: "0.65rem", color: "#f59e0b", marginTop: "0.2rem"}}>Waiting for idle</div>;
+              }
+              return null;
+            })()}
+            {improvementStatus?.improvementLoop.lastCycleTokens != null && improvementStatus.improvementLoop.lastCycleTokens > 0 && (
+              <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.15rem"}}>
+                Last cycle: {Math.round(improvementStatus.improvementLoop.lastCycleTokens / 1000)}k tokens
+              </div>
+            )}
+            {improvementStatus?.improvementLoop.tokensLastHour != null && (
+              <div style={{fontSize: "0.65rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.15rem"}}>
+                Budget: {((improvementStatus.improvementLoop.tokensLastHour / improvementStatus.improvementLoop.tokenBudget) * 100).toFixed(0)}% ({Math.round(improvementStatus.improvementLoop.tokensLastHour / 1000)}k/{Math.round(improvementStatus.improvementLoop.tokenBudget / 1000)}k)
+              </div>
+            )}
+            {improvementStatus?.improvementLoop.consecutiveNoImprovement > 0 && (
+              <div style={{fontSize: "0.65rem", color: "#f59e0b", marginTop: "0.15rem"}}>
+                Stale: {improvementStatus.improvementLoop.consecutiveNoImprovement} cycles
+              </div>
+            )}
+          </div>
+        </div>
       </motion.div>
 
 
       {/* Main Grid: 3 Columns */}
       <div style={{ flex: 1, marginTop: 'var(--live-dashboard-offset)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '2rem', overflow: 'hidden', zIndex: 10 }}>
 
-        {/* Col 1: Agents */}
+        {/* Col 1: Projects */}
         <div className="glass-panel column-panel column-agents" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', overflow: 'hidden' }}>
-          {/* Loop Status — bbclaw specific */}
-          <div className="glass-panel" style={{padding: "1rem", display: "flex", flexDirection: "column", gap: "0.75rem", overflowY: "auto"}}>
-            <div style={{fontSize: "0.75rem", fontWeight: 600, color: "var(--text-secondary, #94a3b8)", textTransform: "uppercase", letterSpacing: "0.05em"}}>
-              Loop Status
-            </div>
-
-            {/* Autonomous Loop — first, runs frequently */}
-            <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center"}}>
-                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🎯 Autonomous Loop</span>
-                <span className={`status-chip ${improvementStatus?.autonomousLoop.isRunning ? "status-running" : "status-idle"}`}>
-                  {improvementStatus?.autonomousLoop.isRunning ? "Active" : "Idle"}
+          <h2 className="column-header">
+            <span>Projects</span>
+            <span className="column-subtitle">{projects.length} total</span>
+          </h2>
+          <div className="task-list" style={{ gap: '0.35rem' }}>
+            {/* "All" filter option */}
+            <SpotlightCard
+              className={`task-card is-clickable ${!selectedProjectId ? 'project-active' : 'project-dimmed'}`}
+              activeColor="rgba(99, 102, 241, 0.12)"
+              onClick={() => setSelectedProjectId(null)}
+              includeBaseClass={false}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 0.75rem' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 600, color: !selectedProjectId ? 'var(--accent-primary)' : 'var(--text-primary)' }}>All Projects</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'Outfit, sans-serif', fontWeight: 600 }}>
+                  {recentTasks.length}
                 </span>
               </div>
-              {(() => {
-                const lastTick = improvementStatus?.autonomousLoop.lastTickAt;
-                if (lastTick) {
-                  const elapsedMs = clockNow - new Date(lastTick).getTime();
-                  const mins = Math.floor(elapsedMs / 60_000);
-                  const label = mins < 1 ? "just now" : `${mins}m ago`;
-                  return (
-                    <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
-                      Last cycle: {label}
-                    </div>
-                  );
-                }
-                return (
-                  <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
-                    Last cycle: waiting for first tick
-                  </div>
-                );
-              })()}
-              <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.2rem"}}>
-                {improvementStatus?.autonomousLoop.projectsWithObjective ?? 0} projects with objective · {improvementStatus?.autonomousLoop.activeScheduledItems ?? 0} scheduled items
-              </div>
-            </div>
-
-            {/* Providers */}
-            {improvementStatus?.providers && improvementStatus.providers.length > 0 && (
-              <div className="glass-card" style={{padding: "0.75rem"}}>
-                <div style={{fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.4rem"}}>⚡ Providers</div>
-                {improvementStatus.providers.map(p => (
-                  <div key={p.name} style={{display: "flex", justifyContent: "space-between", fontSize: "0.75rem", padding: "0.2rem 0"}}>
-                    <span>{p.name}</span>
-                    <span style={{color: p.state === "CLOSED" ? "#22c55e" : p.state === "OPEN" ? "#ef4444" : "#f59e0b"}}>
-                      {p.state === "CLOSED" ? "✓" : p.state === "OPEN" ? "✗" : "~"} {p.state}
+            </SpotlightCard>
+            {projects.map((p) => {
+              const isSelected = selectedProjectId === p.id;
+              const taskCount = p.taskCount24h ?? 0;
+              return (
+                <SpotlightCard
+                  key={p.id}
+                  className={`task-card is-clickable ${isSelected ? 'project-active' : selectedProjectId ? 'project-dimmed' : ''}`}
+                  activeColor="rgba(99, 102, 241, 0.12)"
+                  onClick={() => setSelectedProjectId(isSelected ? null : p.id)}
+                  includeBaseClass={false}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.7rem 0.75rem' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 600, color: isSelected ? 'var(--accent-primary)' : 'var(--text-primary)' }}>
+                      {p.name}
+                    </span>
+                    <span style={{
+                      fontSize: '0.75rem', color: 'var(--text-secondary)',
+                      fontFamily: 'Outfit, sans-serif', fontWeight: 600,
+                      background: taskCount > 0 ? 'rgba(99, 102, 241, 0.15)' : 'transparent',
+                      padding: taskCount > 0 ? '2px 8px' : '2px 0',
+                      borderRadius: '10px',
+                    }}>
+                      {taskCount}
                     </span>
                   </div>
-                ))}
-              </div>
+                </SpotlightCard>
+              );
+            })}
+            {projects.length === 0 && (
+              <p className="task-empty-message visible" style={{ fontSize: '0.8rem' }}>No projects yet.</p>
             )}
-
-            {/* Improvement Loop — last, runs every 6h */}
-            <div className="glass-card" style={{padding: "0.75rem"}}>
-              <div style={{display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "0.5rem"}}>
-                <span style={{fontSize: "0.8rem", fontWeight: 600}}>🔄 Improvement Loop</span>
-                <span className={`status-chip ${improvementStatus?.improvementLoop.isRunning ? "status-running" : "status-idle"}`}>
-                  {improvementStatus?.improvementLoop.isRunning ? "Running" : "Idle"}
-                </span>
-              </div>
-              {/* Next cycle countdown */}
-              {(() => {
-                const nextRun = improvementStatus?.improvementLoop.nextRunAt;
-                const intervalMin = improvementStatus?.improvementLoop.intervalMinutes ?? 360;
-                if (nextRun) {
-                  const nextMs = new Date(nextRun).getTime();
-                  const remainMs = nextMs - clockNow;
-                  if (remainMs > 0) {
-                    const h = Math.floor(remainMs / 3_600_000);
-                    const m = Math.floor((remainMs % 3_600_000) / 60_000);
-                    return (
-                      <div style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
-                        Next cycle: <span style={{color: "var(--text-primary)", fontWeight: 600}}>{h}h {m}m</span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div style={{fontSize: "0.75rem", color: "#f59e0b"}}>
-                      Next cycle: waiting for idle window
-                    </div>
-                  );
-                }
-                return (
-                  <div style={{fontSize: "0.75rem", color: "var(--text-secondary, #94a3b8)"}}>
-                    Next cycle: first run in ~{Math.round(intervalMin / 60)}h
-                  </div>
-                );
-              })()}
-              {improvementStatus?.improvementLoop.lastScoreDelta != null && (
-                <div style={{fontSize: "0.75rem", color: improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "#22c55e" : "#ef4444", marginTop: "0.25rem"}}>
-                  Last Δ: {improvementStatus.improvementLoop.lastScoreDelta >= 0 ? "+" : ""}{improvementStatus.improvementLoop.lastScoreDelta.toFixed(4)}
-                </div>
-              )}
-              {improvementStatus?.improvementLoop.consecutiveNoImprovement > 0 && (
-                <div style={{fontSize: "0.75rem", color: "#f59e0b", marginTop: "0.25rem"}}>
-                  Stale: {improvementStatus.improvementLoop.consecutiveNoImprovement} cycles without improvement
-                </div>
-              )}
-              {(() => {
-                const tokens = improvementStatus?.improvementLoop.lastCycleTokens ?? 0;
-                const budget = improvementStatus?.improvementLoop.tokenBudget ?? 80000;
-                const pct = budget > 0 ? Math.min(100, (tokens / budget) * 100) : 0;
-                return (
-                  <div style={{marginTop: "0.3rem"}}>
-                    <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)"}}>
-                      Last cycle tokens: {tokens > 0 ? `${(tokens / 1000).toFixed(1)}k / ${(budget / 1000).toFixed(0)}k budget` : `No data yet (budget: ${(budget / 1000).toFixed(0)}k)`}
-                    </div>
-                    {tokens > 0 && (
-                      <div style={{background: "rgba(255,255,255,0.08)", borderRadius: "4px", height: "6px", overflow: "hidden", marginTop: "0.25rem"}}>
-                        <div style={{
-                          background: pct > 80 ? "#ef4444" : "#6366f1",
-                          width: `${pct}%`,
-                          height: "100%", borderRadius: "4px", transition: "width 0.5s ease"
-                        }} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-              {(() => {
-                const score = improvementStatus?.behavioralSuite?.lastScore;
-                const passed = improvementStatus?.behavioralSuite?.casesPassed ?? 0;
-                const total = improvementStatus?.behavioralSuite?.casesTotal ?? 0;
-                const hasData = total > 0;
-                const color = hasData ? (score! >= 0.8 ? "#22c55e" : score! >= 0.5 ? "#f59e0b" : "#ef4444") : "var(--text-secondary, #94a3b8)";
-                return (
-                  <div style={{fontSize: "0.7rem", color: "var(--text-secondary, #94a3b8)", marginTop: "0.3rem"}}>
-                    Behavioral score: {hasData
-                      ? <span style={{color, fontWeight: 600}}>{(score! * 100).toFixed(1)}% ({passed}/{total} cases)</span>
-                      : "No data yet"}
-                  </div>
-                );
-              })()}
-            </div>
           </div>
         </div>
 

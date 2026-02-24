@@ -693,8 +693,8 @@ h4,
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
-  padding-right: 8px;
-  scrollbar-gutter: stable both-edges;
+  padding-right: 6px;
+  scrollbar-gutter: stable;
 }
 
 .upcoming-sections {
@@ -793,6 +793,16 @@ h4,
 .task-card.awaiting.status-scheduled {
   background: rgba(12, 18, 36, 0.78);
   border-color: rgba(91, 126, 199, 0.3);
+}
+
+.task-card.project-active {
+  border-color: rgba(99, 102, 241, 0.55);
+  background: rgba(99, 102, 241, 0.12);
+  box-shadow: 0 0 16px rgba(99, 102, 241, 0.15), 0 10px 28px rgba(2, 6, 20, 0.42);
+}
+
+.task-card.project-dimmed {
+  opacity: 0.65;
 }
 
 .task-card-accent {

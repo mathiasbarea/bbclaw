@@ -63,7 +63,7 @@ export function SpotlightCard({
                     zIndex: 0,
                 }}
             />
-            <div style={{ position: 'relative', zIndex: 1 }}>
+            <div style={{ position: 'relative', zIndex: 1, width: '100%' }}>
                 {children}
             </div>
         </div>

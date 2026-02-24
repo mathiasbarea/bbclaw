@@ -78,6 +78,23 @@ async def repl(orchestrator: Orchestrator, verbose: bool, open_dashboard: bool =
 
     console.print("✓ Sistema listo.\n", style="bold green")
 
+    # Set system project as default active project
+    from bbclaw.tools.projects import set_current_session, get_current_session
+    session = get_current_session()
+    if session is None:
+        from types import SimpleNamespace
+        session = SimpleNamespace(
+            active_project_id=orchestrator.system_project_id,
+            session_id="terminal",
+            summary="",
+            history=[],
+            last_activity_at=None,
+        )
+        set_current_session(session)
+        orchestrator._session = session
+    elif not getattr(session, "active_project_id", None):
+        session.active_project_id = orchestrator.system_project_id
+
     # Abrir dashboard en el browser (solo si la API arrancó OK)
     if open_dashboard and orchestrator._api_ready:
         try:
@@ -202,12 +219,18 @@ async def repl(orchestrator: Orchestrator, verbose: bool, open_dashboard: bool =
                 else:
                     console.print(f"Proyecto '{project['name']}' no tiene objective. Usá /objective set <texto>", style="dim")
             elif sub == "set" and len(parts) > 2:
-                text = parts[2]
-                await orchestrator.db.update_project_objective(project["id"], text)
-                console.print(f"✓ Objective actualizado para '{project['name']}'", style="bold green")
+                if project.get("is_system"):
+                    console.print("El proyecto System no puede modificarse.", style="red")
+                else:
+                    text = parts[2]
+                    await orchestrator.db.update_project_objective(project["id"], text)
+                    console.print(f"✓ Objective actualizado para '{project['name']}'", style="bold green")
             elif sub == "clear":
-                await orchestrator.db.update_project_objective(project["id"], "")
-                console.print(f"✓ Objective eliminado de '{project['name']}'", style="bold green")
+                if project.get("is_system"):
+                    console.print("El proyecto System no puede modificarse.", style="red")
+                else:
+                    await orchestrator.db.update_project_objective(project["id"], "")
+                    console.print(f"✓ Objective eliminado de '{project['name']}'", style="bold green")
             else:
                 console.print("Uso: /objective | /objective set <texto> | /objective clear", style="yellow")
             continue
@@ -320,7 +343,13 @@ async def repl(orchestrator: Orchestrator, verbose: bool, open_dashboard: bool =
         # Llamada al agente
         with console.status("[bold yellow]Pensando...[/bold yellow]", spinner="dots"):
             try:
-                response = await orchestrator.run(user_input)
+                response = await asyncio.wait_for(
+                    orchestrator.run(user_input),
+                    timeout=180,
+                )
+            except asyncio.TimeoutError:
+                console.print("[bold red]Error:[/bold red] La solicitud tardó demasiado (timeout 180s). Verificá la conexión al proveedor LLM.")
+                continue
             except Exception as e:
                 console.print(f"[bold red]Error:[/bold red] {e}")
                 if verbose:

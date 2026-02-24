@@ -128,10 +128,18 @@ def create_app(orchestrator) -> Any:
             raise HTTPException(status_code=503, detail="DB no disponible")
         return orchestrator.db
 
-    async def _tasks_in_window(db, hours: int, limit: int) -> list[dict]:
+    async def _tasks_in_window(db, hours: int, limit: int, project_id: str = "") -> list[dict]:
         try:
+            if project_id:
+                return await db.fetchall(
+                    "SELECT id, name, status, agent, result, error, created_at, updated_at, project_id, created_by "
+                    "FROM tasks "
+                    "WHERE updated_at >= datetime('now', ? || ' hours') AND project_id = ? "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (f"-{hours}", project_id, limit),
+                )
             return await db.fetchall(
-                "SELECT id, name, status, agent, result, error, created_at, updated_at "
+                "SELECT id, name, status, agent, result, error, created_at, updated_at, project_id, created_by "
                 "FROM tasks "
                 "WHERE updated_at >= datetime('now', ? || ' hours') "
                 "ORDER BY updated_at DESC LIMIT ?",
@@ -149,18 +157,34 @@ def create_app(orchestrator) -> Any:
     # ── Metrics ───────────────────────────────────────────────────────────────
 
     @api.get("/metrics")
-    async def metrics():
+    async def metrics(project_id: str = ""):
         db = _db()
-        tasks = await db.get_tasks()
-        counts = {"pending": 0, "running": 0, "blocked": 0, "completed": 0, "failed": 0, "canceled": 0}
-        status_map = {"done": "completed", "cancelled": "canceled", "canceled": "canceled"}
-        for t in tasks:
+        # Live counts (pending/running) from all non-terminal tasks
+        if project_id:
+            live_tasks = await db.fetchall(
+                "SELECT status FROM tasks WHERE project_id = ? AND status IN ('pending','running','blocked')",
+                (project_id,),
+            )
+        else:
+            live_tasks = await db.get_tasks()
+        live_counts = {"pending": 0, "running": 0, "blocked": 0}
+        for t in live_tasks:
             s = t.get("status", "pending")
-            s = status_map.get(s, s)
-            if s in counts:
-                counts[s] += 1
-            else:
-                counts["pending"] += 1
+            if s in live_counts:
+                live_counts[s] += 1
+        # 24h window counts for completed/failed (terminal statuses)
+        recent_tasks = await _tasks_in_window(db, 24, 10000, project_id=project_id)
+        completed_24h = sum(1 for t in recent_tasks if t.get("status") == "done")
+        failed_24h = sum(1 for t in recent_tasks if t.get("status") == "failed")
+        canceled_24h = sum(1 for t in recent_tasks if t.get("status") in ("canceled", "cancelled"))
+        counts = {
+            "pending": live_counts["pending"],
+            "running": live_counts["running"],
+            "blocked": live_counts["blocked"],
+            "completed": completed_24h,
+            "failed": failed_24h,
+            "canceled": canceled_24h,
+        }
         projects = await db.get_all_projects()
         import time
         return {
@@ -168,7 +192,7 @@ def create_app(orchestrator) -> Any:
             "activeAgents": 0,
             "totalAgents": 1,
             "activeProjects": len(projects),
-            "recentRunsLast24h": counts["completed"] + counts["failed"],
+            "recentRunsLast24h": completed_24h + failed_24h,
             "uptimeSeconds": int(time.time() - _start_time),
             "timestamp": _now_iso(),
         }
@@ -323,9 +347,9 @@ def create_app(orchestrator) -> Any:
     # ── Tasks ─────────────────────────────────────────────────────────────────
 
     @api.get("/tasks/recent")
-    async def tasks_recent(hours: int = 24, limit: int = 100):
+    async def tasks_recent(hours: int = 24, limit: int = 100, project_id: str = ""):
         db = _db()
-        raw = await _tasks_in_window(db, hours, limit)
+        raw = await _tasks_in_window(db, hours, limit, project_id=project_id)
         status_map = {"done": "completed", "cancelled": "canceled"}
         items = []
         for t in raw:
@@ -337,7 +361,7 @@ def create_app(orchestrator) -> Any:
                 "title": t.get("name", "Sin título"),
                 "status": status_map.get(s, s),
                 "priority": 3,
-                "projectId": "",
+                "projectId": t.get("project_id", ""),
                 "createdBy": t.get("created_by", "user"),
                 "createdAt": _iso_to_epoch(created),
                 "updatedAt": _iso_to_epoch(updated),
@@ -361,6 +385,7 @@ def create_app(orchestrator) -> Any:
                     "title": t.get("name", "Sin título"),
                     "type": "task",
                     "status": t.get("status", "pending"),
+                    "projectId": t.get("project_id", ""),
                     "createdAt": t.get("created_at", ""),
                 })
         except Exception:
@@ -377,6 +402,7 @@ def create_app(orchestrator) -> Any:
                     "title": item["title"],
                     "type": item.get("item_type", "task"),
                     "status": item.get("status", "active"),
+                    "projectId": item.get("project_id", ""),
                     "nextRunAt": item.get("next_run_at"),
                     "runCount": item.get("run_count", 0),
                     "schedule": describe_schedule(sched),
@@ -429,14 +455,23 @@ def create_app(orchestrator) -> Any:
     async def projects():
         db = _db()
         raw = await db.get_all_projects()
+        # Get 24h task counts per project
+        recent_tasks = await _tasks_in_window(db, 24, 10000)
+        project_counts: dict[str, int] = {}
+        for t in recent_tasks:
+            pid = t.get("project_id", "")
+            if pid:
+                project_counts[pid] = project_counts.get(pid, 0) + 1
         items = []
         for p in raw:
+            pid = p.get("id", "")
             items.append({
-                "id": p.get("id", ""),
+                "id": pid,
                 "name": p.get("name", ""),
                 "slug": p.get("slug", ""),
                 "status": "active",
-                "taskCounts": {"pending": 0, "running": 0, "blocked": 0, "completed": 0, "failed": 0, "canceled": 0},
+                "isSystem": bool(p.get("is_system")),
+                "taskCount24h": project_counts.get(pid, 0),
             })
         return items
 
@@ -445,12 +480,16 @@ def create_app(orchestrator) -> Any:
     @api.get("/active-project")
     async def active_project():
         from bbclaw.tools.projects import get_current_session
+        db = _db()
         session = get_current_session()
-        if session and getattr(session, "active_project_id", None):
-            db = _db()
+        active_id = getattr(session, "active_project_id", None) if session else None
+        # Fallback to system project if no active project
+        if not active_id and orchestrator.system_project_id:
+            active_id = orchestrator.system_project_id
+        if active_id:
             project = await db.fetchone(
                 "SELECT id, name, slug, objective FROM projects WHERE id = ?",
-                (session.active_project_id,),
+                (active_id,),
             )
             if project:
                 return {
@@ -485,7 +524,10 @@ def create_app(orchestrator) -> Any:
     async def prompt(req: PromptRequest):
         request_id = str(uuid.uuid4())
         try:
-            response = await orchestrator.run(req.message)
+            response = await asyncio.wait_for(
+                orchestrator.run(req.message),
+                timeout=180,
+            )
             _broadcast("request_finalized", {
                 "requestId": request_id,
                 "message": response[:200],
@@ -496,6 +538,16 @@ def create_app(orchestrator) -> Any:
                 "requestId": request_id,
                 "sessionId": req.sessionId or request_id,
                 "outcome": "completed",
+            }
+        except asyncio.TimeoutError:
+            logger.error("Timeout en /api/prompt (180s)")
+            _broadcast("request_failed", {"requestId": request_id, "message": "Request timed out after 180s"})
+            return {
+                "humanMessage": "Error: la solicitud tardó demasiado (timeout 180s). Verificá la conexión al proveedor LLM.",
+                "message": "Timeout",
+                "requestId": request_id,
+                "sessionId": req.sessionId or request_id,
+                "outcome": "error",
             }
         except Exception as e:
             logger.error("Error en /api/prompt: %s", e)

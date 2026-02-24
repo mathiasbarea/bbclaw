@@ -61,6 +61,9 @@ async def create_scheduled_task(title: str, description: str, schedule: dict) ->
 
     item_id = _gen_id("sched")
     db = get_db()
+    from bbclaw.tools.projects import get_current_session
+    session = get_current_session()
+    pid = getattr(session, "active_project_id", "") if session else ""
     await db.create_scheduled_item(
         item_id=item_id,
         item_type="task",
@@ -68,6 +71,7 @@ async def create_scheduled_task(title: str, description: str, schedule: dict) ->
         description=description,
         schedule=json.dumps(schedule),
         next_run_at=next_run,
+        project_id=pid or "",
     )
     from bbclaw.core.scheduler import describe_schedule
     return (
@@ -114,6 +118,9 @@ async def create_reminder(title: str, schedule: dict) -> str:
 
     item_id = _gen_id("rem")
     db = get_db()
+    from bbclaw.tools.projects import get_current_session
+    session = get_current_session()
+    pid = getattr(session, "active_project_id", "") if session else ""
     await db.create_scheduled_item(
         item_id=item_id,
         item_type="reminder",
@@ -121,6 +128,7 @@ async def create_reminder(title: str, schedule: dict) -> str:
         description="",
         schedule=json.dumps(schedule),
         next_run_at=next_run,
+        project_id=pid or "",
     )
     return (
         f"Reminder creado: {item_id}\n"

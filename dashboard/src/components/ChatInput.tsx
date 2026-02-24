@@ -865,6 +865,8 @@ function TypewriterText({ text, onComplete }: { text: string; onComplete: () => 
 
     useEffect(() => {
         let i = 0;
+        // Dynamic speed: target ~3s total, clamped between 5ms and 30ms per char
+        const interval = Math.max(5, Math.min(30, Math.round(3000 / text.length)));
         const timer = setInterval(() => {
             setDisplayed(() => {
                 const next = text.slice(0, i + 1);
@@ -875,14 +877,16 @@ function TypewriterText({ text, onComplete }: { text: string; onComplete: () => 
                 }
                 return next;
             });
-        }, 30);
+        }, interval);
         return () => clearInterval(timer);
     }, [text, onComplete]);
 
+    const isTyping = displayed.length < text.length;
+
     return (
         <>
-            {displayed}
-            {displayed.length < text.length && (
+            <ChatMarkdown content={displayed} />
+            {isTyping && (
                 <motion.span animate={{ opacity: [1, 0, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} style={{ display: 'inline-block', width: '8px', height: '14px', background: 'var(--accent-primary)', marginLeft: '4px', verticalAlign: 'middle' }} />
             )}
         </>

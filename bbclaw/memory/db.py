@@ -136,6 +136,9 @@ class Database:
             "ALTER TABLE projects ADD COLUMN autonomous_runs_today INTEGER DEFAULT 0",
             "ALTER TABLE projects ADD COLUMN autonomous_runs_date TEXT DEFAULT ''",
             "ALTER TABLE tasks ADD COLUMN created_by TEXT DEFAULT 'user'",
+            "ALTER TABLE projects ADD COLUMN is_system INTEGER DEFAULT 0",
+            "ALTER TABLE tasks ADD COLUMN project_id TEXT DEFAULT ''",
+            "ALTER TABLE scheduled_items ADD COLUMN project_id TEXT DEFAULT ''",
         ]
         for sql in migrations:
             try:
@@ -236,6 +239,37 @@ class Database:
 
     # ── Proyectos ─────────────────────────────────────────────────────────────
 
+    SYSTEM_PROJECT_SLUG = "system"
+    SYSTEM_PROJECT_NAME = "System"
+
+    async def ensure_system_project(self) -> str:
+        """Create the 'system' project if it doesn't exist. Returns its id."""
+        existing = await self.get_project_by_slug(self.SYSTEM_PROJECT_SLUG)
+        if existing:
+            # Ensure is_system flag is set (for DBs created before this migration)
+            if not existing.get("is_system"):
+                await self.execute(
+                    "UPDATE projects SET is_system = 1 WHERE id = ?", (existing["id"],)
+                )
+            return existing["id"]
+        import uuid
+        project_id = str(uuid.uuid4())
+        workspace = str(Path.cwd())
+        await self.execute(
+            "INSERT INTO projects (id, name, slug, description, workspace_path, is_system) "
+            "VALUES (?, ?, ?, ?, ?, 1)",
+            (project_id, self.SYSTEM_PROJECT_NAME, self.SYSTEM_PROJECT_SLUG,
+             "Default system project", workspace),
+        )
+        logger.info("System project created: %s", project_id)
+        return project_id
+
+    async def _is_system_project(self, project_id: str) -> bool:
+        row = await self.fetchone(
+            "SELECT is_system FROM projects WHERE id = ?", (project_id,)
+        )
+        return bool(row and row.get("is_system"))
+
     async def get_all_projects(self) -> list[dict]:
         return await self.fetchall(
             "SELECT * FROM projects ORDER BY last_used_at DESC, created_at DESC"
@@ -267,6 +301,8 @@ class Database:
         color: str | None = None,
         objective: str | None = None,
     ) -> None:
+        if await self._is_system_project(project_id):
+            raise ValueError("El proyecto System no puede modificarse.")
         fields, vals = [], []
         if name is not None:
             fields.append("name = ?")
@@ -299,9 +335,13 @@ class Database:
         )
 
     async def delete_project(self, project_id: str) -> None:
+        if await self._is_system_project(project_id):
+            raise ValueError("El proyecto System no puede eliminarse.")
         await self.execute("DELETE FROM projects WHERE id = ?", (project_id,))
 
     async def update_project_objective(self, project_id: str, objective: str) -> None:
+        if await self._is_system_project(project_id):
+            raise ValueError("El proyecto System no puede modificarse.")
         await self.execute(
             "UPDATE projects SET objective = ? WHERE id = ?", (objective, project_id),
         )
@@ -376,11 +416,12 @@ class Database:
         description: str,
         schedule: str,
         next_run_at: str | None,
+        project_id: str = "",
     ) -> None:
         await self.execute(
-            "INSERT INTO scheduled_items (id, item_type, title, description, schedule, next_run_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (item_id, item_type, title, description, schedule, next_run_at),
+            "INSERT INTO scheduled_items (id, item_type, title, description, schedule, next_run_at, project_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (item_id, item_type, title, description, schedule, next_run_at, project_id),
         )
 
     async def get_due_items(self, now_iso: str) -> list[dict]:

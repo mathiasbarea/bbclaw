@@ -120,7 +120,7 @@ class CodexOAuthProvider(LLMProvider):
     def __init__(self, base_url: str | None = None):
         # base_url ignorado — el endpoint de Codex es fijo
         self._tokens: dict | None = None
-        self._client = httpx.AsyncClient(timeout=120)
+        self._client = httpx.AsyncClient(timeout=60)
 
     # ── Persistencia de tokens ────────────────────────────────────────────────
 
